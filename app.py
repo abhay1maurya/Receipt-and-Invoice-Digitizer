@@ -3,10 +3,6 @@ from PIL import Image
 import os
 import tempfile
 
-# Import your backend functions
-# from src.preprocessing import preprocess_image
-# from src.ocr import run_ocr
-
 
 # -----------------------------
 # PAGE CONFIG
@@ -57,43 +53,5 @@ if uploaded_file.type != "application/pdf":
 else:
     st.warning("PDF uploaded. Image preview will be added later.")
 
-# -----------------------------
-# PREPROCESS IMAGE
-# -----------------------------
-st.subheader("Preprocessed Image")
 
-try:
-    processed_img = preprocess_image(temp_path)
-
-    st.image(processed_img, use_container_width=True)
-    st.success("Image preprocessing completed.")
-
-except Exception as e:
-    st.error("Preprocessing failed.")
-    st.exception(e)
-    st.stop()
-
-# -----------------------------
-# OCR
-# -----------------------------
-st.subheader("OCR Output (Raw Text)")
-
-try:
-    ocr_text = run_ocr(processed_img)
-
-    st.text_area(
-        "Extracted Text",
-        ocr_text,
-        height=300
-    )
-
-    st.success("OCR completed successfully.")
-
-except Exception as e:
-    st.error("OCR failed.")
-    st.exception(e)
-
-# -----------------------------
-# CLEANUP
-# -----------------------------
 os.remove(temp_path)
