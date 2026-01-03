@@ -8,9 +8,7 @@ SUPPORTED_IMAGE_TYPES = (".jpg", ".jpeg", ".png")
 SUPPORTED_PDF_TYPES = (".pdf",)
 
 
-# -------------------------------------------------
 # Utility: Generate file hash (for future duplicates)
-# -------------------------------------------------
 def generate_file_hash(file_path):
     hasher = hashlib.sha256()
     with open(file_path, "rb") as f:
@@ -18,10 +16,7 @@ def generate_file_hash(file_path):
             hasher.update(chunk)
     return hasher.hexdigest()
 
-
-# -------------------------------------------------
 # Utility: Check file type
-# -------------------------------------------------
 def get_file_type(file_path):
     ext = os.path.splitext(file_path)[1].lower()
 
@@ -33,9 +28,7 @@ def get_file_type(file_path):
         raise ValueError("Unsupported file type")
 
 
-# -------------------------------------------------
 # Load image safely
-# -------------------------------------------------
 def load_image(file_path):
     try:
         image = Image.open(file_path).convert("RGB")
@@ -44,9 +37,7 @@ def load_image(file_path):
         raise RuntimeError(f"Failed to load image: {e}")
 
 
-# -------------------------------------------------
 # Convert PDF to images (page-wise)
-# -------------------------------------------------
 def convert_pdf_to_images(file_path, dpi=300):
     try:
         images = convert_from_path(file_path, dpi=dpi)
@@ -55,9 +46,8 @@ def convert_pdf_to_images(file_path, dpi=300):
         raise RuntimeError(f"Failed to convert PDF to images: {e}")
 
 
-# -------------------------------------------------
+
 # Main ingestion function
-# -------------------------------------------------
 def ingest_document(file_path):
     """
     Ingests a document and returns:

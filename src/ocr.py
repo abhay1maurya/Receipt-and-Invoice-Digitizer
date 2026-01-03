@@ -3,10 +3,6 @@ from PIL import Image
 import sys
 import os
 
-# CONFIGURATION: POINT TO TESSERACT EXE
-# If you are on Windows and Tesseract is NOT in your PATH, uncomment and fix this line:
-# pytesseract.pytesseract.tesseract_cmd = r'C:\Program Files\Tesseract-OCR\tesseract.exe'
-
 def run_ocr(image):
     """
     Extracts text from a processed image using Tesseract OCR.
