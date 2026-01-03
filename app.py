@@ -298,7 +298,7 @@ def page_upload_process():
         if st.session_state.processed:
             st.subheader("2. Results")
             
-            tab_view, tab_raw, tab_debug = st.tabs(["👁️ Visual", "📝 Text", "🛠️ Debug"])
+            tab_view, tab_raw, tab_data = st.tabs(["👁️ Visual", "📝 Text", "📝 Data"])
             
             with tab_view:
                 c1, c2 = st.columns(2)
@@ -310,7 +310,7 @@ def page_upload_process():
                     if st.session_state.confidence > 80:
                         st.metric("OCR Confidence", f"{st.session_state.confidence}%", "High")
                     elif st.session_state.confidence > 50:
-                        st.metric("OCR Confidence", f"{st.session_state.confidence}%", "Medium", delta_color="off")
+                        st.metric("OCR Confidence", f"{st.session_state.confidence}%", delta_color="off")
                     else:
                         st.metric("OCR Confidence", f"{st.session_state.confidence}%", "Low", delta_color="inverse")
                     st.progress(st.session_state.confidence / 100)
@@ -319,7 +319,7 @@ def page_upload_process():
                 st.text_area("Extracted Text", value=st.session_state.ocr_result, height=400)
                 st.download_button("Download .txt", st.session_state.ocr_result, "invoice.txt")
 
-            with tab_debug:
+            with tab_data:
                 st.json({"filename": uploaded_file.name if uploaded_file else "N/A", "image_mode": image.mode if uploaded_file else "N/A"})
                 
         else:
