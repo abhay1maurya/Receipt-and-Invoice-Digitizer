@@ -1,7 +1,18 @@
 [theme]
-base="light"
-primaryColor="#4CAF50"
-backgroundColor="#FFFFFF"
-secondaryBackgroundColor="#F5F7FA"
-textColor="#000000"
-font="sans serif"
+# Primary accent color (The "Submit" buttons and highlights)
+primaryColor = "#2563EB" 
+
+# Background color (Leave empty to let Streamlit switch automatically between white/black)
+# backgroundColor = "#FFFFFF" 
+
+# Secondary background color (Sidebar and widgets)
+# secondaryBackgroundColor = "#F3F4F6"
+
+# Text color
+# textColor = "#1F2937" 
+
+# Font family
+font = "sans serif"
+
+[server]
+enableStaticServing = true
