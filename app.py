@@ -24,6 +24,7 @@ sys.path.append(os.path.abspath(os.path.dirname(__file__)))
 try:
     from src.preprocessing import preprocess_image
     from src.ocr import run_ocr
+    from src.ingestion import ingest_document
 except ImportError as e:
     st.warning(f"⚠️ Module Import Warning: {e}")
 
@@ -273,32 +274,56 @@ def page_upload_process():
         st.subheader("1. Input")
         uploaded_file = st.file_uploader(
             "Select File", 
-            type=["jpg", "jpeg", "png"], 
-            help="Supported formats: JPG, PNG. Max size 5MB."
+            # Updated to accept PDF
+            type=["jpg", "jpeg", "png", "pdf"], 
+            help="Supported formats: JPG, PNG, PDF. Max size 5MB."
         )
 
         if uploaded_file:
-            image = Image.open(uploaded_file)
-            st.image(image, caption="Original", use_container_width=True)
-            
-            if st.button("🚀 Process Document", type="primary", use_container_width=True):
-                with st.spinner("Processing..."):
-                    try:
-                        processed_img = preprocess_image(image)
-                        st.session_state.processed_image = processed_img
-                        text, conf = run_ocr(processed_img)
-                        st.session_state.ocr_result = text
-                        st.session_state.confidence = conf
-                        st.session_state.processed = True
-                    except Exception as e:
-                        st.error(f"Error: {e}")
+            try:
+                # 1. NEW INGESTION LOGIC
+                # This handles PDF conversion & validation automatically
+                images, metadata = ingest_document(uploaded_file, filename=uploaded_file.name)
+                
+                # For Milestone 1: Just take the first page
+                original_image = images[0]
+                
+                # Show preview of what we loaded
+                st.image(original_image, caption=f"Original ({metadata['file_type']})", use_container_width=True)
+                
+                # Warning if PDF has multiple pages (Scope management)
+                if metadata['num_pages'] > 1:
+                    st.warning(f"Document has {metadata['num_pages']} pages. Processing Page 1 only.")
+
+                if st.button("🚀 Process Document", type="primary", use_container_width=True):
+                    with st.spinner("Processing..."):
+                        try:
+                            # 2. Preprocessing
+                            processed_img = preprocess_image(original_image)
+                            st.session_state.processed_image = processed_img
+                            
+                            # 3. OCR
+                            text, conf = run_ocr(processed_img)
+                            
+                            # 4. State Update
+                            st.session_state.ocr_result = text
+                            st.session_state.confidence = conf
+                            st.session_state.metadata = metadata # Save metadata for the Data tab
+                            st.session_state.processed = True
+                            
+                        except Exception as e:
+                            st.error(f"Processing Error: {e}")
+                            
+            except Exception as e:
+                st.error(f"Ingestion Failed: {e}")
 
     # COLUMN 2: RESULTS
     with col2:
         if st.session_state.processed:
             st.subheader("2. Results")
             
-            tab_view, tab_raw, tab_data = st.tabs(["👁️ Visual", "📝 Text", "📝 Data"])
+            # Renamed third tab to "Metadata" for clarity
+            tab_view, tab_raw, tab_data = st.tabs(["👁️ Visual", "📝 Text", "ℹ️ Metadata"])
             
             with tab_view:
                 c1, c2 = st.columns(2)
@@ -310,7 +335,7 @@ def page_upload_process():
                     if st.session_state.confidence > 80:
                         st.metric("OCR Confidence", f"{st.session_state.confidence}%", "High")
                     elif st.session_state.confidence > 50:
-                        st.metric("OCR Confidence", f"{st.session_state.confidence}%", delta_color="off")
+                        st.metric("OCR Confidence", f"{st.session_state.confidence}%", "Medium", delta_color="off")
                     else:
                         st.metric("OCR Confidence", f"{st.session_state.confidence}%", "Low", delta_color="inverse")
                     st.progress(st.session_state.confidence / 100)
@@ -320,7 +345,8 @@ def page_upload_process():
                 st.download_button("Download .txt", st.session_state.ocr_result, "invoice.txt")
 
             with tab_data:
-                st.json({"filename": uploaded_file.name if uploaded_file else "N/A", "image_mode": image.mode if uploaded_file else "N/A"})
+                # Use the safe metadata dictionary we saved earlier
+                st.json(st.session_state.get("metadata", {}))
                 
         else:
             st.info("👈 Upload a document to begin.")
