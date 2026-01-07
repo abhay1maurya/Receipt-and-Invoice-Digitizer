@@ -6,7 +6,7 @@ from dotenv import load_dotenv
 # Load environment variables (Create a .env file with GOOGLE_API_KEY="AIza...")
 load_dotenv()
 
-def run_ocr(image):
+def run_ocr(image,api_key):
     """
     Extracts text using Google Gemini 1.5 Flash (via AI Studio).
     
@@ -16,7 +16,7 @@ def run_ocr(image):
     Returns:
         tuple: (full_text (str), confidence (float))
     """
-    api_key = os.getenv("GOOGLE_API_KEY")
+    # api_key = os.getenv("GOOGLE_API_KEY")
     
     if not api_key:
         return "Error: Missing GOOGLE_API_KEY in .env file.", 0.0

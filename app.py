@@ -1,13 +1,9 @@
 import streamlit as st
-from PIL import Image
 import sys
 import os
 import pandas as pd
-import numpy as np
-import matplotlib.pyplot as plt
 import plotly.graph_objects as go
 import plotly.express as px
-from datetime import datetime, timedelta
 
 # PAGE CONFIGURATION
 st.set_page_config(
@@ -24,27 +20,55 @@ sys.path.append(os.path.abspath(os.path.dirname(__file__)))
 try:
     from src.preprocessing import preprocess_image
     from src.ocr import run_ocr
-    from src.ingestion import ingest_document
+    from src.ingestion import ingest_document, generate_file_hash
 except ImportError as e:
     st.warning(f"⚠️ Module Import Warning: {e}")
 
 # SESSION STATE SETUP
 if 'current_page' not in st.session_state:
     st.session_state.current_page = "Dashboard"
-
+if 'api_key' not in st.session_state:
+    st.session_state.api_key = None
 if 'processed' not in st.session_state:
     st.session_state.processed = False
 if 'ocr_result' not in st.session_state:
     st.session_state.ocr_result = ""
-if 'confidence' not in st.session_state:
-    st.session_state.confidence = 0
-if 'processed_image' not in st.session_state:
-    st.session_state.processed_image = None
+if 'images' not in st.session_state:
+    st.session_state.images = None
+if 'metadata' not in st.session_state:
+    st.session_state.metadata = None
+if 'ingestion_done' not in st.session_state:
+    st.session_state.ingestion_done = False
+if 'last_file_hash' not in st.session_state:
+    st.session_state.last_file_hash = None
+if 'processed_images' not in st.session_state:
+    st.session_state.processed_images = []
+
 
 # SIDEBAR NAVIGATION
 with st.sidebar:
     st.title("Digitizer")
     st.caption("Receipt & Invoice Digitizer")
+    st.divider()
+    st.subheader("🔑 API Configuration")
+
+    # INPUT BOX (TEMP VARIABLE)
+    input_key = st.text_input(
+        "Enter Gemini API Key",
+        type="password",
+        placeholder="Paste your API key here"
+    )
+
+    # SAVE ONLY IF USER ENTERS SOMETHING
+    if input_key:
+        st.session_state.api_key = input_key
+
+    # STATUS (CHECK SESSION, NOT INPUT)
+    if st.session_state.api_key:
+        st.success("✅ API Key Loaded")
+    else:
+        st.warning("⚠️ API Key Required for OCR")
+
     st.divider()
     
     st.subheader("Navigation")
@@ -203,7 +227,7 @@ def page_dashboard():
 
     st.divider()
 
-    # RECENT TRANSACTIONS=
+    # RECENT TRANSACTIONS
     st.subheader("📋 Recent Transactions")
     
     transactions_data = {
@@ -280,42 +304,99 @@ def page_upload_process():
         )
 
         if uploaded_file:
+            # Generate hash for the uploaded file
             try:
-                # 1. NEW INGESTION LOGIC
-                # This handles PDF conversion & validation automatically
-                images, metadata = ingest_document(uploaded_file, filename=uploaded_file.name)
+                current_file_hash = generate_file_hash(uploaded_file)
+            except Exception as e:
+                st.error(f"File hash generation failed: {e}")
+                st.stop()
+            
+            # Check if this is a new file (hash changed)
+            file_changed = current_file_hash != st.session_state.last_file_hash
+            
+            # If file changed, reset ALL session state
+            if file_changed:
+                st.session_state.ingestion_done = False
+                st.session_state.images = None
+                st.session_state.metadata = None
+                st.session_state.processed = False
+                st.session_state.ocr_result = ""
+                st.session_state.processed_images = []
+                st.session_state.last_file_hash = None
+            
+            # Run ingestion only once (when not done)
+            if not st.session_state.ingestion_done:
+                try:
+                    # 1. INGESTION LOGIC
+                    # This handles PDF conversion & validation automatically
+                    images, metadata = ingest_document(uploaded_file, filename=uploaded_file.name)
+                    
+                    # Cache the results in session state
+                    st.session_state.images = images
+                    st.session_state.metadata = metadata
+                    st.session_state.ingestion_done = True
+                    st.session_state.last_file_hash = current_file_hash  # Update hash only after success
+                    
+                except Exception as e:
+                    st.error(f"Ingestion Failed: {e}")
+                    st.session_state.ingestion_done = False
+                    st.session_state.last_file_hash = None
+                    st.stop()
+            
+            # Use cached data if ingestion was successful
+            if st.session_state.ingestion_done and st.session_state.images:
+                # Show preview of first page
+                first_image = st.session_state.images[0]
+                st.image(first_image, caption=f"Page 1 Preview ({st.session_state.metadata['file_type']})", use_container_width=True)
                 
-                # For Milestone 1: Just take the first page
-                original_image = images[0]
-                
-                # Show preview of what we loaded
-                st.image(original_image, caption=f"Original ({metadata['file_type']})", use_container_width=True)
-                
-                # Warning if PDF has multiple pages (Scope management)
-                if metadata['num_pages'] > 1:
-                    st.warning(f"Document has {metadata['num_pages']} pages. Processing Page 1 only.")
+                # Show number of pages
+                num_pages = st.session_state.metadata['num_pages']
+                if num_pages > 1:
+                    st.info(f"📄 Document has {num_pages} pages. All pages will be processed.")
 
-                if st.button("🚀 Process Document", type="primary", use_container_width=True):
-                    with st.spinner("Processing..."):
+                # Check if API key is available
+                api_key_available = st.session_state.api_key and st.session_state.api_key.strip() != ""
+                
+                if not api_key_available:
+                    st.warning("⚠️ Please enter your OCR API key in the sidebar to process documents.")
+                
+                if st.button("🚀 Process Document", type="primary", use_container_width=True, disabled=not api_key_available):
+                    # Guard: prevent reprocessing if already done
+                    if st.session_state.processed:
+                        st.info("📋 Document already processed. Upload a new file to process again.")
+                        st.stop()
+                    
+                    with st.spinner(f"Processing {num_pages} page(s)..."):
                         try:
-                            # 2. Preprocessing
-                            processed_img = preprocess_image(original_image)
-                            st.session_state.processed_image = processed_img
+                            # Reset page results
+                            page_texts = []
+                            processed_images = []
                             
-                            # 3. OCR
-                            text, conf = run_ocr(processed_img)
+                            # Process each page
+                            for original_image in st.session_state.images:
+                                # 2. Preprocessing (for this page)
+                                processed_img = preprocess_image(original_image)
+                                processed_images.append(processed_img)
+                                
+                                # 3. OCR (for this page)
+                                text, _ = run_ocr(processed_img, st.session_state.api_key)
+                                page_texts.append(text)
                             
-                            # 4. State Update
-                            st.session_state.ocr_result = text
-                            st.session_state.confidence = conf
-                            st.session_state.metadata = metadata # Save metadata for the Data tab
+                            # 4. Aggregate results
+                            # Combine all page texts with page separators
+                            combined_text = "\n\n--- Page Break ---\n\n".join(
+                                [f"=== Page {i+1} ===\n{txt}" for i, txt in enumerate(page_texts)]
+                            )
+                            
+                            # 5. Store final results
+                            st.session_state.processed_images = processed_images
+                            st.session_state.ocr_result = combined_text
                             st.session_state.processed = True
+                            
+                            st.success(f"✅ Successfully processed {num_pages} page(s)!")
                             
                         except Exception as e:
                             st.error(f"Processing Error: {e}")
-                            
-            except Exception as e:
-                st.error(f"Ingestion Failed: {e}")
 
     # COLUMN 2: RESULTS
     with col2:
@@ -326,19 +407,28 @@ def page_upload_process():
             tab_view, tab_raw, tab_data = st.tabs(["👁️ Visual", "📝 Text", "ℹ️ Metadata"])
             
             with tab_view:
-                c1, c2 = st.columns(2)
-                with c1:
-                    st.image(st.session_state.processed_image, caption="Preprocessed", use_container_width=True)
-                with c2:
-                    # CONFIDENCE METRIC
-                    st.markdown("**Confidence Metrics**")
-                    if st.session_state.confidence > 80:
-                        st.metric("OCR Confidence", f"{st.session_state.confidence}%", "High")
-                    elif st.session_state.confidence > 50:
-                        st.metric("OCR Confidence", f"{st.session_state.confidence}%", "Medium", delta_color="off")
-                    else:
-                        st.metric("OCR Confidence", f"{st.session_state.confidence}%", "Low", delta_color="inverse")
-                    st.progress(st.session_state.confidence / 100)
+                # Show all processed pages if available
+                if st.session_state.processed_images:
+                    num_processed = len(st.session_state.processed_images)
+                    
+                    # Display all pages in a grid
+                    for i in range(0, num_processed, 2):
+                        cols = st.columns(2)
+                        
+                        # First image in row
+                        with cols[0]:
+                            st.image(st.session_state.processed_images[i], 
+                                   caption=f"Page {i+1} (Preprocessed)", 
+                                   use_container_width=True)
+                        
+                        # Second image in row (if exists)
+                        if i + 1 < num_processed:
+                            with cols[1]:
+                                st.image(st.session_state.processed_images[i+1], 
+                                       caption=f"Page {i+2} (Preprocessed)", 
+                                       use_container_width=True)
+                    
+                    st.divider()
 
             with tab_raw:
                 st.text_area("Extracted Text", value=st.session_state.ocr_result, height=400)
