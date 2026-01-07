@@ -29,20 +29,34 @@ if 'current_page' not in st.session_state:
     st.session_state.current_page = "Dashboard"
 if 'api_key' not in st.session_state:
     st.session_state.api_key = None
-if 'processed' not in st.session_state:
-    st.session_state.processed = False
-if 'ocr_result' not in st.session_state:
-    st.session_state.ocr_result = ""
+
+# Document Processing State
+if 'file_type' not in st.session_state:
+    st.session_state.file_type = None  # 'image' or 'pdf'
 if 'images' not in st.session_state:
-    st.session_state.images = None
+    st.session_state.images = None  # List of PIL images
 if 'metadata' not in st.session_state:
     st.session_state.metadata = None
 if 'ingestion_done' not in st.session_state:
     st.session_state.ingestion_done = False
 if 'last_file_hash' not in st.session_state:
     st.session_state.last_file_hash = None
+
+# Page-by-page Processing State
+if 'current_page_index' not in st.session_state:
+    st.session_state.current_page_index = 0
+if 'processed_pages' not in st.session_state:
+    st.session_state.processed_pages = []  # Boolean list tracking which pages are processed
+if 'page_texts' not in st.session_state:
+    st.session_state.page_texts = []  # List of extracted text per page
 if 'processed_images' not in st.session_state:
-    st.session_state.processed_images = []
+    st.session_state.processed_images = []  # List of preprocessed images per page
+
+# Document-level State
+if 'document_processed' not in st.session_state:
+    st.session_state.document_processed = False
+if 'final_document_text' not in st.session_state:
+    st.session_state.final_document_text = ""
 
 
 # SIDEBAR NAVIGATION
@@ -293,17 +307,31 @@ def page_upload_process():
     # MAIN LAYOUT
     col1, col2 = st.columns([1, 2])
 
-    # COLUMN 1: UPLOAD
+    # COLUMN 1: UPLOAD & PROCESSING CONTROLS
     with col1:
         st.subheader("1. Input")
+        
+        # 1️⃣ ENTRY PRECONDITION CHECK
+        api_key_available = st.session_state.api_key and st.session_state.api_key.strip() != ""
+        
+        if not api_key_available:
+            st.warning("⚠️ Please enter your Gemini API key in the sidebar first.")
+        
         uploaded_file = st.file_uploader(
             "Select File", 
-            # Updated to accept PDF
             type=["jpg", "jpeg", "png", "pdf"], 
             help="Supported formats: JPG, PNG, PDF. Max size 5MB."
         )
 
         if uploaded_file:
+            # ✅ VALIDATE FILE SIZE (5MB = 5 * 1024 * 1024 bytes)
+            MAX_FILE_SIZE = 5 * 1024 * 1024  # 5MB in bytes
+            file_size = uploaded_file.size
+            
+            if file_size > MAX_FILE_SIZE:
+                st.error(f"❌ File too large! Size: {file_size / 1024 / 1024:.2f} MB. Maximum allowed: 5 MB")
+                st.stop()
+            
             # Generate hash for the uploaded file
             try:
                 current_file_hash = generate_file_hash(uploaded_file)
@@ -314,28 +342,44 @@ def page_upload_process():
             # Check if this is a new file (hash changed)
             file_changed = current_file_hash != st.session_state.last_file_hash
             
-            # If file changed, reset ALL session state
+            # 🔄 RESET ALL STATE ON NEW FILE
             if file_changed:
-                st.session_state.ingestion_done = False
+                st.session_state.file_type = None
                 st.session_state.images = None
                 st.session_state.metadata = None
-                st.session_state.processed = False
-                st.session_state.ocr_result = ""
+                st.session_state.ingestion_done = False
+                st.session_state.current_page_index = 0
+                st.session_state.processed_pages = []
+                st.session_state.page_texts = []
                 st.session_state.processed_images = []
+                st.session_state.document_processed = False
+                st.session_state.final_document_text = ""
                 st.session_state.last_file_hash = None
             
-            # Run ingestion only once (when not done)
+            # 📥 INGESTION (run only once)
             if not st.session_state.ingestion_done:
                 try:
-                    # 1. INGESTION LOGIC
-                    # This handles PDF conversion & validation automatically
                     images, metadata = ingest_document(uploaded_file, filename=uploaded_file.name)
                     
-                    # Cache the results in session state
+                    # Determine file type
+                    file_ext = uploaded_file.name.lower().split('.')[-1]
+                    if file_ext in ['jpg', 'jpeg', 'png']:
+                        file_type = 'image'
+                    else:
+                        file_type = 'pdf'
+                    
+                    # Cache results
                     st.session_state.images = images
                     st.session_state.metadata = metadata
+                    st.session_state.file_type = file_type
                     st.session_state.ingestion_done = True
-                    st.session_state.last_file_hash = current_file_hash  # Update hash only after success
+                    st.session_state.last_file_hash = current_file_hash
+                    
+                    # Initialize processing arrays based on number of pages
+                    num_pages = len(images)
+                    st.session_state.processed_pages = [False] * num_pages
+                    st.session_state.page_texts = [""] * num_pages
+                    st.session_state.processed_images = [None] * num_pages
                     
                 except Exception as e:
                     st.error(f"Ingestion Failed: {e}")
@@ -343,103 +387,192 @@ def page_upload_process():
                     st.session_state.last_file_hash = None
                     st.stop()
             
-            # Use cached data if ingestion was successful
+            # 📄 DISPLAY FILE INFO & PROCESSING CONTROLS
             if st.session_state.ingestion_done and st.session_state.images:
-                # Show preview of first page
-                first_image = st.session_state.images[0]
-                st.image(first_image, caption=f"Page 1 Preview ({st.session_state.metadata['file_type']})", use_container_width=True)
+                num_pages = len(st.session_state.images)
+                file_type = st.session_state.file_type
                 
-                # Show number of pages
-                num_pages = st.session_state.metadata['num_pages']
-                if num_pages > 1:
-                    st.info(f"📄 Document has {num_pages} pages. All pages will be processed.")
-
-                # Check if API key is available
-                api_key_available = st.session_state.api_key and st.session_state.api_key.strip() != ""
+                # Show file type info
+                if file_type == 'image':
+                    st.success(f"✅ Image loaded (Single page)")
+                elif num_pages == 1:
+                    st.success(f"✅ PDF loaded (1 page, treated as image)")
+                else:
+                    st.info(f"📄 PDF loaded ({num_pages} pages)")
                 
-                if not api_key_available:
-                    st.warning("⚠️ Please enter your OCR API key in the sidebar to process documents.")
+                st.divider()
                 
-                if st.button("🚀 Process Document", type="primary", use_container_width=True, disabled=not api_key_available):
-                    # Guard: prevent reprocessing if already done
-                    if st.session_state.processed:
-                        st.info("📋 Document already processed. Upload a new file to process again.")
-                        st.stop()
+                # 2️⃣ CASE A & B HANDLING: Single Image/Page Processing
+                if file_type == 'image' or num_pages == 1:
+                    # SINGLE PAGE MODE
+                    current_image = st.session_state.images[0]
+                    is_processed = st.session_state.processed_pages[0]
                     
-                    with st.spinner(f"Processing {num_pages} page(s)..."):
-                        try:
-                            # Reset page results
-                            page_texts = []
-                            processed_images = []
-                            
-                            # Process each page
-                            for original_image in st.session_state.images:
-                                # 2. Preprocessing (for this page)
-                                processed_img = preprocess_image(original_image)
-                                processed_images.append(processed_img)
+                    # Show preview
+                    st.image(current_image, caption="Document Preview", use_container_width=True)
+                    
+                    # Process button (disabled if no API key or already processed)
+                    process_disabled = not api_key_available or is_processed
+                    
+                    if st.button(
+                        "🚀 Process Document", 
+                        type="primary", 
+                        use_container_width=True, 
+                        disabled=process_disabled,
+                        key="process_single"
+                    ):
+                        with st.spinner("Processing document..."):
+                            try:
+                                # Preprocessing
+                                processed_img = preprocess_image(current_image)
+                                st.session_state.processed_images[0] = processed_img
                                 
-                                # 3. OCR (for this page)
+                                # OCR
                                 text, _ = run_ocr(processed_img, st.session_state.api_key)
-                                page_texts.append(text)
-                            
-                            # 4. Aggregate results
-                            # Combine all page texts with page separators
+                                st.session_state.page_texts[0] = text
+                                st.session_state.processed_pages[0] = True
+                                
+                                # Mark as finalized (single page)
+                                st.session_state.final_document_text = text
+                                st.session_state.document_processed = True
+                                
+                                st.success("✅ Document processed successfully!")
+                                st.rerun()
+                                
+                            except Exception as e:
+                                st.error(f"Processing Error: {e}")
+                    
+                    # Show status
+                    if is_processed:
+                        st.success("✅ Document processed")
+                        st.info("💾 Save to Database (Coming in Milestone 3)")
+                
+                # 3️⃣ CASE B: Multi-page PDF Processing (Page-by-page)
+                else:
+                    # MULTI-PAGE MODE
+                    current_idx = st.session_state.current_page_index
+                    current_image = st.session_state.images[current_idx]
+                    is_current_processed = st.session_state.processed_pages[current_idx]
+                    all_processed = all(st.session_state.processed_pages)
+                    
+                    # Page navigation info
+                    st.write(f"**Current Page: {current_idx + 1} / {num_pages}**")
+                    
+                    # Show current page preview
+                    st.image(current_image, caption=f"Page {current_idx + 1} Preview", use_container_width=True)
+                    
+                    # Process current page button
+                    process_disabled = not api_key_available or is_current_processed
+                    
+                    if st.button(
+                        f"🚀 Process Page {current_idx + 1}", 
+                        type="primary", 
+                        use_container_width=True, 
+                        disabled=process_disabled,
+                        key=f"process_page_{current_idx}"
+                    ):
+                        with st.spinner(f"Processing page {current_idx + 1}..."):
+                            try:
+                                # Preprocessing
+                                processed_img = preprocess_image(current_image)
+                                st.session_state.processed_images[current_idx] = processed_img
+                                
+                                # OCR
+                                text, _ = run_ocr(processed_img, st.session_state.api_key)
+                                st.session_state.page_texts[current_idx] = text
+                                st.session_state.processed_pages[current_idx] = True
+                                
+                                st.success(f"✅ Page {current_idx + 1} processed!")
+                                st.rerun()
+                                
+                            except Exception as e:
+                                st.error(f"Processing Error: {e}")
+                    
+                    # Show page status
+                    if is_current_processed:
+                        st.success(f"✅ Page {current_idx + 1} processed")
+                    
+                    st.divider()
+                    
+                    # Navigation & Finalization buttons
+                    col_nav1, col_nav2 = st.columns(2)
+                    
+                    with col_nav1:
+                        # Previous Page button
+                        if current_idx > 0:
+                            if st.button("⬅️ Previous Page", use_container_width=True):
+                                st.session_state.current_page_index -= 1
+                                st.rerun()
+                    
+                    with col_nav2:
+                        # Next Page button (only if current page is processed and not last page)
+                        if is_current_processed and current_idx < num_pages - 1:
+                            if st.button("Next Page ➡️", use_container_width=True):
+                                st.session_state.current_page_index += 1
+                                st.rerun()
+                    
+                    # 4️⃣ FINALIZATION: Combine all pages after last page is processed
+                    if all_processed and not st.session_state.document_processed:
+                        st.divider()
+                        if st.button("📑 Finalize Document", type="primary", use_container_width=True):
+                            # Combine all page texts
                             combined_text = "\n\n--- Page Break ---\n\n".join(
-                                [f"=== Page {i+1} ===\n{txt}" for i, txt in enumerate(page_texts)]
+                                [f"=== Page {i+1} ===\n{txt}" for i, txt in enumerate(st.session_state.page_texts)]
                             )
-                            
-                            # 5. Store final results
-                            st.session_state.processed_images = processed_images
-                            st.session_state.ocr_result = combined_text
-                            st.session_state.processed = True
-                            
-                            st.success(f"✅ Successfully processed {num_pages} page(s)!")
-                            
-                        except Exception as e:
-                            st.error(f"Processing Error: {e}")
+                            st.session_state.final_document_text = combined_text
+                            st.session_state.document_processed = True
+                            st.success("✅ Document finalized!")
+                            st.rerun()
+                    
+                    # Show finalization status
+                    if st.session_state.document_processed:
+                        st.success("✅ Document finalized")
+                        st.info("💾 Save to Database (Coming in Milestone 3)")
+                    
+                    # Processing progress indicator
+                    st.divider()
+                    processed_count = sum(st.session_state.processed_pages)
+                    st.progress(processed_count / num_pages)
+                    st.caption(f"Progress: {processed_count}/{num_pages} pages processed")
 
-    # COLUMN 2: RESULTS
+    # COLUMN 2: RESULTS DISPLAY
     with col2:
-        if st.session_state.processed:
+        if st.session_state.document_processed:
             st.subheader("2. Results")
             
-            # Renamed third tab to "Metadata" for clarity
             tab_view, tab_raw, tab_data = st.tabs(["👁️ Visual", "📝 Text", "ℹ️ Metadata"])
             
             with tab_view:
-                # Show all processed pages if available
-                if st.session_state.processed_images:
-                    num_processed = len(st.session_state.processed_images)
+                # Show all processed pages
+                processed_imgs = [img for img in st.session_state.processed_images if img is not None]
+                
+                if processed_imgs:
+                    num_processed = len(processed_imgs)
                     
-                    # Display all pages in a grid
+                    # Display in grid (2 per row)
                     for i in range(0, num_processed, 2):
                         cols = st.columns(2)
                         
-                        # First image in row
                         with cols[0]:
-                            st.image(st.session_state.processed_images[i], 
+                            st.image(processed_imgs[i], 
                                    caption=f"Page {i+1} (Preprocessed)", 
                                    use_container_width=True)
                         
-                        # Second image in row (if exists)
                         if i + 1 < num_processed:
                             with cols[1]:
-                                st.image(st.session_state.processed_images[i+1], 
+                                st.image(processed_imgs[i+1], 
                                        caption=f"Page {i+2} (Preprocessed)", 
                                        use_container_width=True)
-                    
-                    st.divider()
 
             with tab_raw:
-                st.text_area("Extracted Text", value=st.session_state.ocr_result, height=400)
-                st.download_button("Download .txt", st.session_state.ocr_result, "invoice.txt")
+                st.text_area("Extracted Text", value=st.session_state.final_document_text, height=400)
+                st.download_button("Download .txt", st.session_state.final_document_text, "document.txt")
 
             with tab_data:
-                # Use the safe metadata dictionary we saved earlier
                 st.json(st.session_state.get("metadata", {}))
                 
         else:
-            st.info("👈 Upload a document to begin.")
+            st.info("👈 Upload and process a document to view results.")
 
 # PAGE: HISTORY
 def page_history():
