@@ -24,20 +24,28 @@ def run_ocr(image: Image.Image, api_key: str) -> Tuple[str, float]:
         return "Error: Image has invalid dimensions.", 0.0
 
     try:
+        generation_config = {
+            'temperature': 0.0,
+            'top_p':0.1,
+            "max_output_tokens": 2048
+        }
         # 1. Configure the API
         genai.configure(api_key=api_key)
         
         # 2. Select Model
         # 'gemini-2.5-flash' is fast, cheap (free tier), and great at vision.
-        model = genai.GenerativeModel('gemini-2.5-flash')
+        model = genai.GenerativeModel(model_name='gemini-2.5-flash', generation_config=generation_config)
         
         # 3. Create the Prompt
         # We must be very specific so it acts like an OCR engine, not a chat bot.
         prompt = """
-        You are an OCR engine. 
-        Extract all text from this receipt or invoice image exactly as it appears. 
-        Preserve line breaks and relative positioning. 
-        Do not explain anything. Just output the raw text.
+        You are a strict OCR engine.
+        Do NOT summarize, interpret, or correct text.
+        Do NOT fix spelling or grammar.
+        Preserve original casing, numbers, symbols, and line breaks.
+        If text is unclear, output it as-is.
+        Return ONLY the extracted text.
+
         """
         
         # 4. Generate Content
@@ -47,19 +55,18 @@ def run_ocr(image: Image.Image, api_key: str) -> Tuple[str, float]:
         # 5. Extract Text
         extracted_text = response.text if response.text else ""
         
-        # Gemini doesn't give a numerical confidence score like Tesseract.
-        # We estimate confidence based on response quality.
-        if extracted_text and len(extracted_text.strip()) > 0:
-            confidence = 95.0
-        else:
-            confidence = 0.0
-            extracted_text = "Warning: No text extracted from image."
-        
-        return extracted_text, confidence
+        return extracted_text
+
+    except genai.types.BlockedPromptException:
+        return "Error: Prompt blocked by safety filters.", 0.0
+
+    except TimeoutError:
+        return "Error: OCR request timed out.", 0.0
 
     except ValueError as e:
-        # API key or configuration errors
-        return f"Configuration Error: {str(e)}", 0.0
+        # API key, config, or invalid input
+        return f"Configuration Error: {e}", 0.0
+
     except Exception as e:
-        # Catch-all for other errors (network, API limits, etc.)
-        return f"OCR Failed: {str(e)}", 0.0
+        # Network issues, quota, unknown Gemini errors
+        return f"OCR Failed: {e}", 0.0

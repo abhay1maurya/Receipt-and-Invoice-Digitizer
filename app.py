@@ -311,7 +311,7 @@ def page_upload_process():
     with col1:
         st.subheader("1. Input")
         
-        # 1️⃣ ENTRY PRECONDITION CHECK
+        # ENTRY PRECONDITION CHECK
         api_key_available = st.session_state.api_key and st.session_state.api_key.strip() != ""
         
         if not api_key_available:
@@ -324,7 +324,7 @@ def page_upload_process():
         )
 
         if uploaded_file:
-            # ✅ VALIDATE FILE SIZE (5MB = 5 * 1024 * 1024 bytes)
+            # VALIDATE FILE SIZE (5MB = 5 * 1024 * 1024 bytes)
             MAX_FILE_SIZE = 5 * 1024 * 1024  # 5MB in bytes
             file_size = uploaded_file.size
             
@@ -342,7 +342,7 @@ def page_upload_process():
             # Check if this is a new file (hash changed)
             file_changed = current_file_hash != st.session_state.last_file_hash
             
-            # 🔄 RESET ALL STATE ON NEW FILE
+            # RESET ALL STATE ON NEW FILE
             if file_changed:
                 st.session_state.file_type = None
                 st.session_state.images = None
@@ -356,7 +356,7 @@ def page_upload_process():
                 st.session_state.final_document_text = ""
                 st.session_state.last_file_hash = None
             
-            # 📥 INGESTION (run only once)
+            # INGESTION (run only once)
             if not st.session_state.ingestion_done:
                 try:
                     images, metadata = ingest_document(uploaded_file, filename=uploaded_file.name)
@@ -387,7 +387,7 @@ def page_upload_process():
                     st.session_state.last_file_hash = None
                     st.stop()
             
-            # 📄 DISPLAY FILE INFO & PROCESSING CONTROLS
+            # DISPLAY FILE INFO & PROCESSING CONTROLS
             if st.session_state.ingestion_done and st.session_state.images:
                 num_pages = len(st.session_state.images)
                 file_type = st.session_state.file_type
@@ -402,7 +402,7 @@ def page_upload_process():
                 
                 st.divider()
                 
-                # 2️⃣ CASE A & B HANDLING: Single Image/Page Processing
+                # CASE A & B HANDLING: Single Image/Page Processing
                 if file_type == 'image' or num_pages == 1:
                     # SINGLE PAGE MODE
                     current_image = st.session_state.images[0]
@@ -447,7 +447,7 @@ def page_upload_process():
                         st.success("✅ Document processed")
                         st.info("💾 Save to Database (Coming in Milestone 3)")
                 
-                # 3️⃣ CASE B: Multi-page PDF Processing (Page-by-page)
+                # CASE B: Multi-page PDF Processing (Page-by-page)
                 else:
                     # MULTI-PAGE MODE
                     current_idx = st.session_state.current_page_index
@@ -511,7 +511,7 @@ def page_upload_process():
                                 st.session_state.current_page_index += 1
                                 st.rerun()
                     
-                    # 4️⃣ FINALIZATION: Combine all pages after last page is processed
+                    # FINALIZATION: Combine all pages after last page is processed
                     if all_processed and not st.session_state.document_processed:
                         st.divider()
                         if st.button("📑 Finalize Document", type="primary", use_container_width=True):

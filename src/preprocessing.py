@@ -1,6 +1,7 @@
-from PIL import Image
+from PIL import Image, ImageEnhance, ImageFilter
 from typing import Union
 import numpy as np
+import cv2
 
 def preprocess_image(image_input: Union[str, Image.Image]) -> Image.Image:
     """
@@ -48,9 +49,26 @@ def preprocess_image(image_input: Union[str, Image.Image]) -> Image.Image:
         img = background
     elif img.mode != 'RGB':
         img = img.convert('RGB')
-        
-    # 3. Resize if huge (> 2000px) to speed up API upload
-    # Gemini 1.5 Flash has a token limit, reducing resolution saves money and time.
+    
+    # 4. Convert to Grayscale
+    img = img.convert('L')
+
+    # 5. Contrast enhancement
+    enhancer = ImageEnhance.Contrast(img)
+    img = enhancer.enhance(1.8)
+
+    # 6. Binarization (Otsu — NOT mean)
+    _, binary_np = cv2.threshold(
+        img_np, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU
+    )
+    
+    img = Image.fromarray(binary_np, mode='L')
+
+    # 7. Noise removal (median filter) 
+    img = img.filter(ImageFilter.MedianFilter(size=3))
+
+    # 8. Resize if huge (> 2000px) to speed up API upload
+    # Gemini 2.5 Flash has a token limit, reducing resolution saves money and time.
     max_dimension = 2000
     if max(img.size) > max_dimension:
         # Calculate aspect ratio to avoid distortion
@@ -58,5 +76,33 @@ def preprocess_image(image_input: Union[str, Image.Image]) -> Image.Image:
         new_size = (int(img.width * scale), int(img.height * scale))
         # Use LANCZOS for high-quality downsampling (backward compatible)
         img = img.resize(new_size, Image.LANCZOS)
+
+    # 9. Deskew / orientation correction
+    img_np = np.array(img)
+    
+    coords = np.column_stack(np.where(img_np > 0))
+    if coords.shape[0] < 10:
+        return img
+    angle = cv2.minAreaRect(coords)[-1]
+
+    # OpenCV returns weird angles — fix them
+    if angle < -45:
+        angle = -(90 + angle)
+    else:
+        angle = -angle
+
+    # Rotate image to correct skew
+    (h,w) = img_np.shape[:2]
+    center = (w // 2, h //2)
+    M = cv2.getRotationMatrix2D(center, angle, 1.0)
+    deskewed  = cv2.warpAffine(
+        img_np,
+        M,
+        (w,h),
+        flags=cv2.INTER_CUBIC,
+        borderMode= cv2.BORDER_REPLICATE
+    )
+
+    img = Image.fromarray(deskewed)
         
     return img
