@@ -1,70 +1,162 @@
-from google import genai
-from typing import Tuple
-from PIL import Image
+# OCR and structured data extraction using Google Gemini AI
+# This module handles text extraction from receipt/invoice images
+# and parses the extracted data into structured JSON format matching database schema
 
-def run_ocr(image: Image.Image, api_key: str) -> Tuple[str, float]:
-    """
-    Extracts text using Google Gemini 2.5 Flash (via AI Studio).
+from typing import Dict
+from google import genai
+from PIL import Image
+import json
+
+def run_ocr_and_extract_bill(image: Image.Image, api_key: str) -> Dict:
+    """Extract structured bill data from image using Gemini AI.
+    
+    This function combines OCR and data extraction in a single API call.
+    Gemini analyzes the image and returns structured JSON matching our schema.
     
     Args:
-        image (PIL.Image): The input image.
-        api_key (str): Google Gemini API key.
-        
+        image: PIL Image object of receipt or invoice
+        api_key: Google Gemini API key for authentication
+    
     Returns:
-        tuple: (extracted_text (str), confidence (float))
+        Dictionary containing extracted bill data with normalized fields,
+        or error dictionary if extraction fails.
+    
+    Process:
+        1. Validate inputs (API key and image)
+        2. Send image to Gemini with structured prompt
+        3. Parse JSON response
+        4. Normalize data types and add calculated fields
     """
-    # Validate inputs
+    # Validate API key before making expensive API call
     if not api_key or not api_key.strip():
-        return "Error: API key is required.", 0.0
-    
+        return {"error": "API key is required"}
+
+    # Validate image input
     if not isinstance(image, Image.Image):
-        return "Error: Invalid image format. Expected PIL.Image.", 0.0
-    
-    if image.width == 0 or image.height == 0:
-        return "Error: Image has invalid dimensions.", 0.0
+        return {"error": "Invalid image provided"}
 
+    # Initialize Gemini AI client with provided API key
+    client = genai.Client(api_key=api_key)
+
+    # Structured prompt instructs Gemini to extract data in exact JSON schema
+    # Key requirements:
+    # - ONLY return JSON (no markdown, explanations, or extra text)
+    # - Use defaults for missing fields to prevent incomplete responses
+    # - Follow exact schema structure for database compatibility
+    prompt = (
+        "Extract receipt/invoice data.\n"
+        "Return ONLY valid JSON.\n"
+        "Do NOT include explanations.\n"
+        "If a field is missing, use defaults.\n\n"
+        "Schema:\n"
+        "{"
+        "\"vendor_name\": string,"  # Store or business name
+        "\"purchase_date\": \"YYYY-MM-DD\","  # Date format for database DATE type
+        "\"purchase_time\": \"HH:MM\","  # Optional time of purchase
+        "\"currency\": \"USD\","  # ISO currency code
+        "\"items\": ["  # Array of line items
+        " {\"s_no\": int, \"item_name\": string, \"quantity\": number, "
+        "  \"unit_price\": number, \"item_total\": number}"
+        "],"
+        "\"tax\": number,"  # Total tax amount
+        "\"total_amount\": number,"  # Grand total including tax
+        "\"payment_method\": string"  # Cash, Card, etc.
+        "}"
+    )
+
+
+    # Make API request to Gemini with image and prompt
     try:
-        # 1. New Client API
-        client = genai.Client(api_key=api_key)
-
-        # 2. Prompt (strict OCR behavior)
-        prompt = """
-        You are a strict OCR engine.
-        Do NOT summarize, interpret, or correct text.
-        Do NOT fix spelling or grammar.
-        Preserve original casing, numbers, symbols, and line breaks.
-        If text is unclear, output it as-is.
-        Return ONLY the extracted text.
-
-        """
-
-        # 3. Generate content (new SDK)
         response = client.models.generate_content(
-            model="gemini-2.5-flash",
-            contents=[prompt, image],
+            model="gemini-2.5-flash",  # Fast model optimized for document understanding
+            contents=[prompt, image],  # Send both text prompt and image
             config={
-                "temperature": 0.0,
-                "max_output_tokens": 2048
-            }
+                "temperature": 0.0,  # Deterministic output for consistent extraction
+                "max_output_tokens": 4096,  # Enough for large receipts with many items
+                "response_mime_type": "application/json"  # Force JSON response format
+            },
         )
 
-        # 4. Extract Text
-        extracted_text = response.text or ""
-
-        def estimate_confidence(text: str) -> float:
-            if not text or len(text.strip()) < 20:
-                return 10.0
-
-            length_score = min(len(text) / 500, 1.0) * 40
-            number_score = 30 if any(char.isdigit() for char in text) else 0
-            symbol_score = 20 if any(sym in text for sym in ["$", "₹", "€"]) else 0
-
-            return round(length_score + number_score + symbol_score, 1)
-
-        confidence = estimate_confidence(extracted_text)
-
-        return extracted_text, confidence
-
     except Exception as e:
-        # Network issues, config errors, quota, SDK errors
-        return f"OCR Failed: {e}", 0.0
+        return {"error": f"Gemini request failed: {e}"}
+
+    # Parse JSON response from Gemini
+    try:
+        bill_data = json.loads(response.text)
+    except Exception as e:
+        # Return error with partial response for debugging
+        return {
+            "error": "Gemini returned invalid JSON (hard failure)",
+            "raw_response": response.text[:300]  # First 300 chars for debugging
+        }
+
+    # Data normalization - ensure all required fields exist with proper defaults
+    # This prevents KeyError when accessing fields in downstream code
+    defaults = {
+        "vendor_name": "",  # Empty string if vendor not detected
+        "purchase_date": "",  # Empty string if date not found
+        "purchase_time": "",  # Optional field
+        "currency": "USD",  # Default to USD if currency not specified
+        "items": [],  # Empty array if no items detected
+        "tax": 0,  # Zero tax if not specified
+        "total_amount": 0,  # Zero total if not detected
+        "payment_method": ""  # Empty string if payment method not found
+        }
+
+    # Apply defaults for any missing keys
+    for k, v in defaults.items():
+        bill_data.setdefault(k, v)
+
+    # Normalize numeric fields - convert strings to floats for database storage
+    # Gemini may return numbers as strings, so we ensure proper type conversion
+    for key in ("tax", "total_amount"):
+        try:
+            bill_data[key] = float(bill_data[key])
+        except Exception:
+            bill_data[key] = 0.0  # Fallback to 0 if conversion fails
+
+    # Normalize line items - ensure consistent structure and data types
+    # Each item gets sequential s_no and proper numeric conversions
+    normalized_items = []
+    for idx, item in enumerate(bill_data["items"], 1):
+        # Skip invalid items (non-dictionary entries)
+        if not isinstance(item, dict):
+            continue
+
+        # Convert quantity to float with error handling
+        try:
+            quantity = float(item.get("quantity", 0))
+        except:
+            quantity = 0.0
+
+        # Convert unit_price to float with error handling
+        try:
+            unit_price = float(item.get("unit_price", 0))
+        except:
+            unit_price = 0.0
+
+        # Calculate item_total if not provided (quantity * unit_price)
+        try:
+            item_total = float(item.get("item_total", quantity * unit_price))
+        except:
+            item_total = quantity * unit_price
+
+        # Build normalized item dictionary
+        normalized_items.append({
+            "s_no": idx,  # Sequential number for display
+            "item_name": item.get("item_name", ""),  # Item description
+            "quantity": quantity,
+            "unit_price": unit_price,
+            "item_total": item_total
+        })
+
+    # Replace items array with normalized version
+    bill_data["items"] = normalized_items
+
+    # Add backward compatibility fields for database insert function
+    # Database schema uses tax_amount, but OCR returns tax
+    bill_data["tax_amount"] = bill_data["tax"]
+    # Calculate subtotal for display purposes (total - tax)
+    bill_data["subtotal"] = bill_data["total_amount"] - bill_data["tax_amount"]
+
+    return bill_data
