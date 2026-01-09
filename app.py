@@ -88,15 +88,15 @@ with st.sidebar:
     st.subheader("Navigation")
     
     # Page selection buttons
-    if st.button("📊 Dashboard", key="nav_dashboard", use_container_width=True):
+    if st.button("📊 Dashboard", key="nav_dashboard", width="stretch"):
         st.session_state.current_page = "Dashboard"
         st.rerun()
     
-    if st.button("🧾 Upload & Process", key="nav_upload", use_container_width=True):
+    if st.button("🧾 Upload & Process", key="nav_upload", width="stretch"):
         st.session_state.current_page = "Upload & Process"
         st.rerun()
     
-    if st.button("🕒 History", key="nav_history", use_container_width=True):
+    if st.button("🕒 History", key="nav_history", width="stretch"):
         st.session_state.current_page = "History"
         st.rerun()
     
@@ -150,7 +150,7 @@ def page_dashboard():
             xaxis_title='Month',
             showlegend=False
         )
-        st.plotly_chart(fig1, use_container_width=True)
+        st.plotly_chart(fig1, width="stretch")
 
     # Chart 2: Spending by Category
     with col_chart2:
@@ -170,7 +170,7 @@ def page_dashboard():
             height=350,
             margin=dict(l=0, r=0, t=20, b=0),
         )
-        st.plotly_chart(fig2, use_container_width=True)
+        st.plotly_chart(fig2, width="stretch")
 
     st.divider()
 
@@ -199,7 +199,7 @@ def page_dashboard():
             xaxis_title='Vendor',
             showlegend=False
         )
-        st.plotly_chart(fig3, use_container_width=True)
+        st.plotly_chart(fig3, width="stretch")
 
     # Top Purchased Items
     with col_items:
@@ -223,7 +223,7 @@ def page_dashboard():
             xaxis_title='Item Category',
             showlegend=False
         )
-        st.plotly_chart(fig4, use_container_width=True)
+        st.plotly_chart(fig4, width="stretch")
 
     st.divider()
 
@@ -253,7 +253,7 @@ def page_dashboard():
     }
     df_transactions = pd.DataFrame(transactions_data)
     
-    st.dataframe(df_transactions, use_container_width=True, hide_index=True)
+    st.dataframe(df_transactions, width="stretch", hide_index=True)
 
     st.divider()
 
@@ -268,7 +268,7 @@ def page_dashboard():
     }
     df_breakdown = pd.DataFrame(category_breakdown)
     
-    st.dataframe(df_breakdown, use_container_width=True, hide_index=True)
+    st.dataframe(df_breakdown, width="stretch", hide_index=True)
 
     st.divider()
 
@@ -295,7 +295,7 @@ def page_dashboard():
         xaxis_title='Category',
         hovermode='x unified'
     )
-    st.plotly_chart(fig5, use_container_width=True)
+    st.plotly_chart(fig5, width="stretch")
 
 
 # PAGE: UPLOAD & PROCESS
@@ -409,7 +409,7 @@ def page_upload_process():
                     is_processed = st.session_state.processed_pages[0]
                     
                     # Show preview
-                    st.image(current_image, caption="Document Preview", use_container_width=True)
+                    st.image(current_image, caption="Document Preview", width="stretch")
                     
                     # Process button (disabled if no API key or already processed)
                     process_disabled = not api_key_available or is_processed
@@ -417,7 +417,7 @@ def page_upload_process():
                     if st.button(
                         "🚀 Process Document", 
                         type="primary", 
-                        use_container_width=True, 
+                        width="stretch", 
                         disabled=process_disabled,
                         key="process_single"
                     ):
@@ -459,7 +459,7 @@ def page_upload_process():
                     st.write(f"**Current Page: {current_idx + 1} / {num_pages}**")
                     
                     # Show current page preview
-                    st.image(current_image, caption=f"Page {current_idx + 1} Preview", use_container_width=True)
+                    st.image(current_image, caption=f"Page {current_idx + 1} Preview", width="stretch")
                     
                     # Process current page button
                     process_disabled = not api_key_available or is_current_processed
@@ -467,7 +467,7 @@ def page_upload_process():
                     if st.button(
                         f"🚀 Process Page {current_idx + 1}", 
                         type="primary", 
-                        use_container_width=True, 
+                        width="stretch", 
                         disabled=process_disabled,
                         key=f"process_page_{current_idx}"
                     ):
@@ -500,21 +500,21 @@ def page_upload_process():
                     with col_nav1:
                         # Previous Page button
                         if current_idx > 0:
-                            if st.button("⬅️ Previous Page", use_container_width=True):
+                            if st.button("⬅️ Previous Page", width="stretch"):
                                 st.session_state.current_page_index -= 1
                                 st.rerun()
                     
                     with col_nav2:
                         # Next Page button (only if current page is processed and not last page)
                         if is_current_processed and current_idx < num_pages - 1:
-                            if st.button("Next Page ➡️", use_container_width=True):
+                            if st.button("Next Page ➡️", width="stretch"):
                                 st.session_state.current_page_index += 1
                                 st.rerun()
                     
                     # FINALIZATION: Combine all pages after last page is processed
                     if all_processed and not st.session_state.document_processed:
                         st.divider()
-                        if st.button("📑 Finalize Document", type="primary", use_container_width=True):
+                        if st.button("📑 Finalize Document", type="primary", width="stretch"):
                             # Combine all page texts
                             combined_text = "\n\n--- Page Break ---\n\n".join(
                                 [f"=== Page {i+1} ===\n{txt}" for i, txt in enumerate(st.session_state.page_texts)]
@@ -539,38 +539,53 @@ def page_upload_process():
     with col2:
         if st.session_state.document_processed:
             st.subheader("2. Results")
-            
-            tab_view, tab_raw, tab_data = st.tabs(["👁️ Visual", "📝 Text", "ℹ️ Metadata"])
-            
-            with tab_view:
-                # Show all processed pages
-                processed_imgs = [img for img in st.session_state.processed_images if img is not None]
-                
+
+            # Tabs: Results + Metadata
+            tab_results, tab_metadata = st.tabs(["📄 Results", "ℹ️ Metadata"])
+
+            # TAB 1: RESULTS
+            with tab_results:
+
+                # Image Grid
+                processed_imgs = [
+                    img for img in st.session_state.processed_images if img is not None
+                ]
+
                 if processed_imgs:
-                    num_processed = len(processed_imgs)
-                    
-                    # Display in grid (2 per row)
-                    for i in range(0, num_processed, 2):
-                        cols = st.columns(2)
-                        
-                        with cols[0]:
-                            st.image(processed_imgs[i], 
-                                   caption=f"Page {i+1} (Preprocessed)", 
-                                   use_container_width=True)
-                        
-                        if i + 1 < num_processed:
-                            with cols[1]:
-                                st.image(processed_imgs[i+1], 
-                                       caption=f"Page {i+2} (Preprocessed)", 
-                                       use_container_width=True)
+                    st.markdown("### 🖼️ Processed Pages")
 
-            with tab_raw:
-                st.text_area("Extracted Text", value=st.session_state.final_document_text, height=400)
-                st.download_button("Download .txt", st.session_state.final_document_text, "document.txt")
+                    # 3-column responsive grid
+                    cols = st.columns(3)
+                    for idx, img in enumerate(processed_imgs):
+                        with cols[idx % 3]:
+                            st.image(
+                                img,
+                                caption=f"Page {idx + 1}",
+                                width="stretch"
+                            )
 
-            with tab_data:
+                    st.divider()
+
+                # OCR Text (Below Images)
+                st.markdown("### 📝 Extracted Text")
+
+                st.text_area(
+                    label="OCR Output",
+                    value=st.session_state.final_document_text,
+                    height=400
+                )
+
+                st.download_button(
+                    label="⬇️ Download Text",
+                    data=st.session_state.final_document_text,
+                    file_name="document.txt",
+                    mime="text/plain"
+                )
+
+            # TAB 2: METADATA
+            with tab_metadata:
                 st.json(st.session_state.get("metadata", {}))
-                
+
         else:
             st.info("👈 Upload and process a document to view results.")
 

@@ -1,4 +1,4 @@
-from PIL import Image, ImageEnhance, ImageFilter
+from PIL import Image, ImageEnhance, ImageFilter, ImageOps
 from typing import Union
 import numpy as np
 import cv2
@@ -17,6 +17,9 @@ def preprocess_image(image_input: Union[str, Image.Image]) -> Image.Image:
         else:
             # Assume it's a file-like object (BytesIO)
             img = Image.open(image_input)
+
+        # Normalize orientation using EXIF metadata if present
+        img = ImageOps.exif_transpose(img)
     except Exception as e:
         raise ValueError(f"Could not load image for preprocessing: {e}")
 
@@ -51,21 +54,21 @@ def preprocess_image(image_input: Union[str, Image.Image]) -> Image.Image:
         img = img.convert('RGB')
     
     # 4. Convert to Grayscale
-    img = img.convert('L')
+    if img.mode != 'L':
+        img = img.convert('L')
 
     # 5. Contrast enhancement
     enhancer = ImageEnhance.Contrast(img)
     img = enhancer.enhance(1.8)
 
     # 6. Binarization (Otsu — NOT mean)
+    img_np = np.array(img)
     _, binary_np = cv2.threshold(
         img_np, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU
     )
-    
-    img = Image.fromarray(binary_np, mode='L')
 
-    # 7. Noise removal (median filter) 
-    img = img.filter(ImageFilter.MedianFilter(size=3))
+    # 7. Noise removal (median filter via OpenCV for speed)
+    binary_np = cv2.medianBlur(binary_np, 3)
 
     # 8. Resize if huge (> 2000px) to speed up API upload
     # Gemini 2.5 Flash has a token limit, reducing resolution saves money and time.
@@ -77,32 +80,6 @@ def preprocess_image(image_input: Union[str, Image.Image]) -> Image.Image:
         # Use LANCZOS for high-quality downsampling (backward compatible)
         img = img.resize(new_size, Image.LANCZOS)
 
-    # 9. Deskew / orientation correction
-    img_np = np.array(img)
-    
-    coords = np.column_stack(np.where(img_np > 0))
-    if coords.shape[0] < 10:
-        return img
-    angle = cv2.minAreaRect(coords)[-1]
-
-    # OpenCV returns weird angles — fix them
-    if angle < -45:
-        angle = -(90 + angle)
-    else:
-        angle = -angle
-
-    # Rotate image to correct skew
-    (h,w) = img_np.shape[:2]
-    center = (w // 2, h //2)
-    M = cv2.getRotationMatrix2D(center, angle, 1.0)
-    deskewed  = cv2.warpAffine(
-        img_np,
-        M,
-        (w,h),
-        flags=cv2.INTER_CUBIC,
-        borderMode= cv2.BORDER_REPLICATE
-    )
-
-    img = Image.fromarray(deskewed)
-        
-    return img
+    # 9. Skip rotation to avoid any cropping/cutoffs
+    # Return the binarized, denoised image without deskewing
+    return Image.fromarray(binary_np, mode='L')
