@@ -29,7 +29,6 @@ def preprocess_image(image_input: Union[str, Image.Image]) -> Image.Image:
         ValueError: If image cannot be loaded or has invalid dimensions
     """
     # Step 1: Safe image loading with format detection
-    # Step 1: Safe image loading with format detection
     try:
         # Handle different input types (file path, PIL Image, BytesIO)
         if isinstance(image_input, str):

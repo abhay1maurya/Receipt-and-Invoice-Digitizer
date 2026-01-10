@@ -22,10 +22,10 @@ FileInput = Union[str, io.BytesIO, BinaryIO]
 
 # Security and performance limits
 MAX_PDF_PAGES = 5  # Limit PDF pages to prevent RAM exhaustion from large documents
-Image.MAX_IMAGE_PIXELS = 100_000_000  # Prevent decompression bomb attacks (100 megapixel limit)
+Image.MAX_IMAGE_PIXELS = 10_000_000  # Prevent decompression bomb attacks (10 megapixel limit)
 
 # Supported file format definitions
-SUPPORTED_IMAGE_TYPES = {".jpg", ".jpeg", ".png", ".bmp", ".tiff", ".webp"}
+SUPPORTED_IMAGE_TYPES = {".jpg", ".jpeg", ".png"}
 SUPPORTED_PDF_TYPES = {".pdf"}
 
 def generate_file_hash(file_input: FileInput) -> str:

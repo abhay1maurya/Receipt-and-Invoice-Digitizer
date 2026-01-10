@@ -6,6 +6,7 @@ from typing import Dict
 from google import genai
 from PIL import Image
 import json
+import re
 
 def run_ocr_and_extract_bill(image: Image.Image, api_key: str) -> Dict:
     """Extract structured bill data from image using Gemini AI.
@@ -87,7 +88,7 @@ def run_ocr_and_extract_bill(image: Image.Image, api_key: str) -> Dict:
         # Return error with partial response for debugging
         return {
             "error": "Gemini returned invalid JSON (hard failure)",
-            "raw_response": response.text[:300]  # First 300 chars for debugging
+            "raw_response": response.text[:1000]  # First 1000 chars for debugging
         }
 
     # Data normalization - ensure all required fields exist with proper defaults
@@ -107,6 +108,23 @@ def run_ocr_and_extract_bill(image: Image.Image, api_key: str) -> Dict:
     for k, v in defaults.items():
         bill_data.setdefault(k, v)
 
+    # Normalize purchase_time to HH:MM:SS for MySQL TIME compatibility
+    t = bill_data.get("purchase_time", "")
+    if isinstance(t, str) and t.strip():
+        m = re.match(r"^\s*(\d{1,2}):(\d{2})(?::(\d{2}))?\s*$", t)
+        if m:
+            hh = int(m.group(1))
+            mm = int(m.group(2))
+            ss = int(m.group(3)) if m.group(3) else 0
+            bill_data["purchase_time"] = f"{hh:02d}:{mm:02d}:{ss:02d}"
+        else:
+            # If time cannot be parsed, set empty to avoid DB errors
+            bill_data["purchase_time"] = ""
+
+    # Normalize currency and payment_method lengths for DB constraints
+    bill_data["currency"] = str(bill_data.get("currency", "USD")).upper()[:10]
+    bill_data["payment_method"] = str(bill_data.get("payment_method", "")).strip()[:50]
+
     # Normalize numeric fields - convert strings to floats for database storage
     # Gemini may return numbers as strings, so we ensure proper type conversion
     for key in ("tax", "total_amount"):
@@ -123,11 +141,11 @@ def run_ocr_and_extract_bill(image: Image.Image, api_key: str) -> Dict:
         if not isinstance(item, dict):
             continue
 
-        # Convert quantity to float with error handling
+        # Convert quantity to integer for DB (INT NOT NULL) with safe coercion
         try:
-            quantity = float(item.get("quantity", 0))
+            quantity = int(round(float(item.get("quantity", 0))))
         except:
-            quantity = 0.0
+            quantity = 0
 
         # Convert unit_price to float with error handling
         try:

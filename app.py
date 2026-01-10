@@ -88,10 +88,10 @@ with st.sidebar:
     st.title("Digitizer")
     st.caption("Receipt & Invoice Digitizer")
     st.divider()
-    st.subheader("🔑 API Configuration")
-
+    
     # API key input - stored as password field for security
     # Uses temporary variable to avoid clearing on rerun
+    st.subheader("🔑 API Configuration")
     input_key = st.text_input(
         "Enter Gemini API Key",
         type="password",
@@ -240,7 +240,7 @@ def page_dashboard():
             xaxis_title="Month",
             showlegend=False,
         )
-        st.plotly_chart(fig1, use_container_width=True)
+        st.plotly_chart(fig1, width=1200)
 
     with col_chart2:
         st.subheader("🏪 Spending by Vendor")
@@ -256,7 +256,7 @@ def page_dashboard():
             height=350,
         )
         fig2.update_layout(margin=dict(l=0, r=0, t=20, b=0), yaxis_title="Amount ($)", xaxis_title="Vendor", showlegend=False)
-        st.plotly_chart(fig2, use_container_width=True)
+        st.plotly_chart(fig2, width=1200)
 
     st.divider()
 
@@ -267,7 +267,11 @@ def page_dashboard():
         st.subheader("🔝 Top Vendors (by spend)")
         # Show top 10 vendors by total spending
         top_vendors = by_vendor.head(10)
-        st.dataframe(top_vendors.rename(columns={"vendor_name": "Vendor", "total_amount": "Spent ($)"}), hide_index=True, use_container_width=True)
+        st.dataframe(
+            top_vendors.rename(columns={"vendor_name": "Vendor", "total_amount": "Spent ($)"}),
+            hide_index=True,
+            width="stretch",
+        )
 
     with col_items:
         st.subheader("⭐ Top Items (by spend)")
@@ -285,7 +289,11 @@ def page_dashboard():
                 .reset_index()
                 .head(10)  # Top 10 most expensive items
             )
-            st.dataframe(top_items.rename(columns={"item_name": "Item", "item_total": "Spent ($)"}), hide_index=True, use_container_width=True)
+            st.dataframe(
+                top_items.rename(columns={"item_name": "Item", "item_total": "Spent ($)"}),
+                hide_index=True,
+                width="stretch",
+            )
         else:
             st.info("No line items available yet.")
 
@@ -293,14 +301,23 @@ def page_dashboard():
 
     # Recent transactions table - shows latest 20 bills
     st.subheader("📋 Recent Bills")
-    recent_cols = ["id", "vendor_name", "purchase_date", "total_amount", "tax_amount", "currency"]
+    recent_cols = [
+        "id",
+        "vendor_name",
+        "purchase_date",
+        "purchase_time",
+        "payment_method",
+        "total_amount",
+        "tax_amount",
+        "currency",
+    ]
     # Sort by date descending to show most recent first
     recent = bills_df.sort_values(by="purchase_date_dt", ascending=False).head(20)
     recent_display = recent[recent_cols].copy()
     # Format currency columns for display
     recent_display["total_amount"] = recent_display["total_amount"].apply(lambda x: f"${x:.2f}")
     recent_display["tax_amount"] = recent_display["tax_amount"].apply(lambda x: f"${x:.2f}")
-    st.dataframe(recent_display, hide_index=True, use_container_width=True)
+    st.dataframe(recent_display, hide_index=True, width="stretch")
 
 
 # PAGE: UPLOAD & PROCESS - handles file upload, preprocessing, OCR, and database save
@@ -542,21 +559,32 @@ def page_upload_process():
                             bills_df['tax_amount'] = bills_df['tax_amount'].apply(lambda x: f"${x:.2f}")
 
                             # Define invoice schema columns to display
-                            visible_cols = ['id', 'vendor_name', 'purchase_date', 'total_amount', 'tax_amount', 'currency']
+                            visible_cols = [
+                                'id',
+                                'vendor_name',
+                                'purchase_date',
+                                'purchase_time',
+                                'payment_method',
+                                'total_amount',
+                                'tax_amount',
+                                'currency',
+                            ]
 
                             # Table 1: Overview of all saved bills
                             st.dataframe(
                                 bills_df[visible_cols],
                                 width="stretch",
                                 hide_index=True,
-                                use_container_width=True
                             )
 
                             st.markdown("### 🔍 Detailed Bill Items")
 
                             # Dropdown to select a bill and view its line items
                             bill_options = [b['id'] for b in all_bills]
-                            bill_labels = [f"Bill #{b['id']} - {b['vendor_name']} - {b['purchase_date']}" for b in all_bills]
+                            bill_labels = [
+                                f"Bill #{b['id']} - {b['vendor_name']} - {b['purchase_date']}"
+                                for b in all_bills
+                            ]
                             selected_bill_id = st.selectbox(
                                 "Select ID to view items:",
                                 options=bill_options,
@@ -568,7 +596,7 @@ def page_upload_process():
                                 bill_items = get_bill_items(selected_bill_id)
                                 if bill_items:
                                     items_detail_df = pd.DataFrame(bill_items)
-                                    st.dataframe(items_detail_df, width="stretch", hide_index=True, use_container_width=True)
+                                    st.dataframe(items_detail_df, width="stretch", hide_index=True)
                                 else:
                                     st.info("No items found for this bill")
                         else:
@@ -623,13 +651,21 @@ def page_history():
         bills_df['tax_amount'] = bills_df['tax_amount'].apply(lambda x: f"${x:.2f}")
 
         # Display invoice schema columns
-        visible_cols = ['id', 'vendor_name', 'purchase_date', 'total_amount', 'tax_amount', 'currency']
+        visible_cols = [
+            'id',
+            'vendor_name',
+            'purchase_date',
+            'purchase_time',
+            'payment_method',
+            'total_amount',
+            'tax_amount',
+            'currency',
+        ]
 
         st.dataframe(
             bills_df[visible_cols],
             width="stretch",
             hide_index=True,
-            use_container_width=True
         )
         
         st.divider()
