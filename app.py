@@ -32,6 +32,7 @@ try:
     from src.ocr import run_ocr_and_extract_bill
     from src.ingestion import ingest_document, generate_file_hash
     from src.database import init_db, insert_bill, get_all_bills, get_bill_items, get_bill_details
+    from src.validation import validate_bill_amounts
 except ImportError as e:
     st.warning(f"⚠️ Module Import Warning: {e}")
 
@@ -170,6 +171,17 @@ def _cached_items(bills):
     return items
 
 
+# Dialog function to display uploaded image in a modal popup
+@st.dialog("📷 Uploaded Image")
+def show_uploaded_image_dialog(image, caption):
+    """Display uploaded image in a modal dialog popup.
+    Args:
+        image: PIL Image object (original uploaded image)
+        caption: Title/caption for the image"""
+    st.image(image, caption=caption, width="stretch")
+    st.info("Click outside the dialog to close.")
+
+
 # PAGE: DASHBOARD - displays spending analytics, charts, and recent bills
 def page_dashboard():
     st.title("My Spending Dashboard")
@@ -303,6 +315,7 @@ def page_dashboard():
     st.subheader("📋 Recent Bills")
     recent_cols = [
         "id",
+        "invoice_number",
         "vendor_name",
         "purchase_date",
         "purchase_time",
@@ -449,6 +462,14 @@ def page_upload_process():
                     # Display preprocessed image (or original if preprocessing failed)
                     st.image(processed_image or current_image, caption="Preprocessed Image", width="stretch")
 
+                    # Button to view original uploaded image in dialog
+                    if st.button(
+                        "👁️ View Uploaded Image",
+                        key="view_uploaded_single",
+                        width="stretch"
+                    ):
+                        show_uploaded_image_dialog(current_image, "Uploaded Image")
+
                     # Single save button - runs OCR and saves to database in one step
                     if st.button(
                         "💾 Save My Bill",
@@ -462,6 +483,17 @@ def page_upload_process():
                         with st.spinner("Extracting and saving bill (single call)..."):
                             # Run OCR and extract structured data using Gemini API
                             bill_data = run_ocr_and_extract_bill(target_img, st.session_state.api_key)
+
+                            # # Validation of the totals, tax and items totals
+                            validation = validate_bill_amounts(bill_data)
+
+                            if not validation["is_valid"]:
+                                st.warning(
+                                    "⚠ Bill amount validation failed. "
+                                    "Item totals and final total do not align. Please review."
+                                )
+
+
                             if "error" in bill_data:
                                 st.error(f"❌ Extraction failed: {bill_data['error']}")
                             else:
@@ -505,6 +537,14 @@ def page_upload_process():
 
                     st.write(f"**Page: {current_idx + 1} / {num_pages}**")
                     st.image(processed_image or current_image, caption=f"Page {current_idx + 1} (Preprocessed)", width="stretch")
+
+                    # Button to view original uploaded page in dialog
+                    if st.button(
+                        f"👁️ View Uploaded Page {current_idx + 1}",
+                        key=f"view_uploaded_page_{current_idx}",
+                        width="stretch"
+                    ):
+                        show_uploaded_image_dialog(current_image, f"Uploaded Page {current_idx + 1}")
 
                     st.divider()
 
@@ -561,6 +601,7 @@ def page_upload_process():
                             # Define invoice schema columns to display
                             visible_cols = [
                                 'id',
+                                'invoice_number',
                                 'vendor_name',
                                 'purchase_date',
                                 'purchase_time',
@@ -653,6 +694,7 @@ def page_history():
         # Display invoice schema columns
         visible_cols = [
             'id',
+            'invoice_number',
             'vendor_name',
             'purchase_date',
             'purchase_time',

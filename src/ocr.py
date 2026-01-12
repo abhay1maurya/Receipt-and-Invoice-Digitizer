@@ -51,6 +51,7 @@ def run_ocr_and_extract_bill(image: Image.Image, api_key: str) -> Dict:
         "If a field is missing, use defaults.\n\n"
         "Schema:\n"
         "{"
+        "\"invoice_number\": string,"  # Invoice/Receipt ID or number
         "\"vendor_name\": string,"  # Store or business name
         "\"purchase_date\": \"YYYY-MM-DD\","  # Date format for database DATE type
         "\"purchase_time\": \"HH:MM\","  # Optional time of purchase
@@ -94,6 +95,7 @@ def run_ocr_and_extract_bill(image: Image.Image, api_key: str) -> Dict:
     # Data normalization - ensure all required fields exist with proper defaults
     # This prevents KeyError when accessing fields in downstream code
     defaults = {
+        "invoice_number": "",  # Empty string if invoice number not found
         "vendor_name": "",  # Empty string if vendor not detected
         "purchase_date": "",  # Empty string if date not found
         "purchase_time": "",  # Optional field
@@ -107,6 +109,9 @@ def run_ocr_and_extract_bill(image: Image.Image, api_key: str) -> Dict:
     # Apply defaults for any missing keys
     for k, v in defaults.items():
         bill_data.setdefault(k, v)
+
+    # Normalize invoice_number length for DB constraint (VARCHAR 100)
+    bill_data["invoice_number"] = str(bill_data.get("invoice_number", "")).strip()[:100]
 
     # Normalize purchase_time to HH:MM:SS for MySQL TIME compatibility
     t = bill_data.get("purchase_time", "")
