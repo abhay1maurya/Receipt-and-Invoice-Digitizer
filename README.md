@@ -1,7 +1,4 @@
-Below is a **complete, professional, industry-grade README** for your **Receipt & Invoice Digitizer** project.
-It is **ready to paste into GitHub** and aligned strictly with **Milestone 1 scope** (no overclaiming).
 
----
 
 # 📄 Receipt & Invoice Digitizer
 
@@ -274,13 +271,4 @@ The **Receipt & Invoice Digitizer** (Milestone 1) delivers a **production-ready 
 
 The system is designed to scale seamlessly into enterprise-grade expense management and document intelligence solutions.
 
----
 
-If you want, I can also provide:
-
-* 📘 **Short README (1-page version)**
-* 🎓 **Academic-style documentation**
-* 🎤 **README tailored for viva/exam**
-* 📊 **Architecture diagrams (SVG/PNG)**
-
-Just tell me.
