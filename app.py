@@ -23,15 +23,18 @@ st.set_page_config(
 sys.path.append(os.path.abspath(os.path.dirname(__file__)))
 
 # Import core functionality from src package
-# - preprocessing: Image enhancement for better OCR accuracy
-# - ocr: Gemini API integration for text extraction and structured data parsing
+# WORKFLOW: Upload → Ingest → Preprocess → User Trigger → Gemini OCR → 
+#           Normalize → Validate → Duplicate Check → Store → Cache → Display
 # - ingestion: File upload handling (images, PDFs) and hash generation for change detection
-# - database: MySQL persistence layer for invoices and line items
+# - preprocessing: Image enhancement for better OCR accuracy
+# - ocr: Gemini API integration (includes normalization via extraction.normalizer)
+# - validation: Amount validation (inclusive/exclusive safe checks)
+# - database: SQLite persistence layer with duplicate detection for bills and line items
 try:
     from src.preprocessing import preprocess_image
-    from src.ocr import run_ocr_and_extract_bill
+    from src.ocr import run_ocr_and_extract_bill  # Internally uses normalizer
     from src.ingestion import ingest_document, generate_file_hash
-    from src.database import init_db, insert_bill, get_all_bills, get_bill_items, get_bill_details
+    from src.database import init_db, insert_bill, get_all_bills, get_bill_items, get_bill_details, detect_duplicate_bill_logical
     from src.validation import validate_bill_amounts
 except ImportError as e:
     st.warning(f"⚠️ Module Import Warning: {e}")
@@ -477,14 +480,15 @@ def page_upload_process():
                         width="stretch",
                         disabled=not api_key_available,  # Disabled if no API key
                         key="save_single"
-                    ):
+                    ):  
                         # Use preprocessed image if available, fallback to original
                         target_img = processed_image or current_image
-                        with st.spinner("Extracting and saving bill (single call)..."):
-                            # Run OCR and extract structured data using Gemini API
+                        
+                        with st.spinner("Extracting and saving bill..."):
+                            # 5. GEMINI OCR - Extract structured data with normalization
                             bill_data = run_ocr_and_extract_bill(target_img, st.session_state.api_key)
 
-                            # # Validation of the totals, tax and items totals
+                            # 6. VALIDATE - Check amount consistency (tax-inclusive/exclusive tolerant)
                             validation = validate_bill_amounts(bill_data)
 
                             if not validation["is_valid"]:
@@ -497,14 +501,30 @@ def page_upload_process():
                             if "error" in bill_data:
                                 st.error(f"❌ Extraction failed: {bill_data['error']}")
                             else:
-                                # Store extracted data in session state
-                                st.session_state.final_document_text = bill_data.get('ocr_text', '')
+                                # 7. DUPLICATE CHECK - Prevent duplicate bills by comparing key fields
+                                # Matches on: invoice_number + vendor_name + purchase_date + total_amount (±0.02)
+                                if detect_duplicate_bill_logical(bill_data, user_id=1):
+                                    st.warning(
+                                        "⚠️ Duplicate bill detected! "
+                                        "A bill with the same invoice number, vendor, date, and amount already exists."
+                                    )
+                                    st.stop()
+                                
+                                # 8. STORE - Save to session state and database
+                                st.session_state.final_document_text = ""
                                 st.session_state.extracted_bill_data = bill_data
-                                # Save to database and get new bill ID
+                                
+                                # Insert into database (persistent storage)
                                 bill_id = insert_bill(bill_data)
                                 st.session_state.bill_saved = True
+                                
+                                # 9. CACHE - Invalidate cache to reflect new bill in dashboard
+                                # Streamlit's @st.cache_data(ttl=60) auto-refreshes on next access
+                                
                                 st.success(f"✅ Bill saved successfully! (ID: {bill_id})")
-                                st.rerun()  # Refresh to show updated results
+                                
+                                # 10. DISPLAY - Rerun to show updated results and database tables
+                                st.rerun()
 
                 # WORKFLOW CASE B: Multi-page PDF processing
                 # Page-by-page navigation and individual save buttons
@@ -556,14 +576,31 @@ def page_upload_process():
                         disabled=not api_key_available,
                         key=f"save_page_{current_idx}"
                     ):
+                        # WORKFLOW: Upload → Ingest → Preprocess → User Trigger (this button)
                         target_img = processed_image or current_image
-                        with st.spinner(f"Extracting and saving page {current_idx + 1}..."):
-                            # Run OCR on selected page only
+                        
+                        with st.spinner(f"Processing page {current_idx + 1}..."):
+                            # OCR + Normalize - Extract and standardize bill data
                             bill_data = run_ocr_and_extract_bill(target_img, st.session_state.api_key)
+                            
                             if "error" in bill_data:
                                 st.error(f"❌ Extraction failed: {bill_data['error']}")
                             else:
-                                st.session_state.final_document_text = bill_data.get('ocr_text', '')
+                                # Validate - Verify amount calculations
+                                validation = validate_bill_amounts(bill_data)
+                                if not validation["is_valid"]:
+                                    st.warning("⚠ Validation warning: Amounts may not align perfectly")
+                                
+                                # Duplicate Check - Prevent re-saving same bill from different pages
+                                if detect_duplicate_bill_logical(bill_data, user_id=1):
+                                    st.warning(
+                                        "⚠️ Duplicate bill detected! "
+                                        "A bill with the same invoice number, vendor, date, and amount already exists."
+                                    )
+                                    st.stop()
+                                
+                                # Store - Save to database and update session state
+                                st.session_state.final_document_text = ""
                                 st.session_state.extracted_bill_data = bill_data
                                 bill_id = insert_bill(bill_data)
                                 st.session_state.bill_saved = True

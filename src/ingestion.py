@@ -139,16 +139,18 @@ def convert_pdf(file_input: FileInput) -> List[Image.Image]:
         # Enforce page limit to prevent out-of-memory errors
         # Only convert first N pages of large PDFs
         if isinstance(file_input, str):
-            # Convert from file path
+            # Convert from file path - last_page parameter limits pages converted
             return convert_from_path(file_input, dpi=300, last_page=MAX_PDF_PAGES)
         else:
             # Convert from bytes (stream object)
             file_input.seek(0)  # Reset stream position
             pdf_bytes = file_input.read()  # Read entire PDF into memory
             file_input.seek(0)  # Reset for potential reuse
+            # Convert bytes to images with page limit
             return convert_from_bytes(pdf_bytes, dpi=300, last_page=MAX_PDF_PAGES)
             
     except PDFInfoNotInstalledError:
+        # Poppler is required dependency for PDF conversion
         # Provide helpful error message with installation instructions
         raise EnvironmentError(
             "Poppler is not installed. Install it to process PDFs.\n"
@@ -157,6 +159,7 @@ def convert_pdf(file_input: FileInput) -> List[Image.Image]:
             "Linux: sudo apt install poppler-utils"
         )
     except Exception as e:
+        # Catch all other PDF conversion errors
         raise RuntimeError(f"PDF Conversion failed: {e}")
 
 def ingest_document(file_input: FileInput, filename: str = "unknown") -> Tuple[List[Image.Image], Dict]:

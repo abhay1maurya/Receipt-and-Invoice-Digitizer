@@ -9,7 +9,7 @@
 ## 📌 Project Overview
 
 The **Receipt & Invoice Digitizer** is a multi-page Streamlit-based web application that converts physical receipts and invoices into structured digital records.
-The system automates document ingestion, preprocessing, OCR, structured data extraction using **Google Gemini AI**, and persistent storage in a **MySQL database**, while providing analytics and history through an interactive UI.
+The system automates document ingestion, preprocessing, OCR, structured data extraction using **Google Gemini AI**, and persistent storage in a **SQLite database**, while providing analytics and history through an interactive UI.
 
 This project addresses the real-world problem of **manual bill entry**, **expense tracking**, and **data loss from physical receipts**.
 
@@ -44,11 +44,15 @@ Preprocessing Layer
         ↓
 OCR & Structured Extraction (Gemini AI)
         ↓
+Normalization Layer
+        ↓
+Validation Layer
+        ↓
 Session State Cache
         ↓
 Streamlit UI (Results, Dashboard, History)
         ↓
-MySQL Database (Bills & Line Items)
+SQLite Database (Bills & Line Items)
 ```
 
 ---
@@ -130,22 +134,24 @@ Ensures numerical consistency of extracted data.
 
 ---
 
-### 5️⃣ Database Module (MySQL)
+### 5️⃣ Database Module (SQLite)
 
 **Purpose:**
-Provides persistent storage for digitized bills.
+Provides lightweight, serverless persistent storage for digitized bills.
 
 **Schema Design:**
 
-* `users` – user metadata
-* `bills` – bill/invoice headers
-* `lineitems` – itemized bill details
+* `bills` – bill/invoice headers (vendor, date, totals, tax, etc.)
+* `lineitems` – itemized bill details (description, quantity, price)
 
 **Key Characteristics:**
 
+* Serverless (no installation required)
+* File-based storage (receipt_invoice.db)
 * Relational design with foreign keys
-* Cascading deletes for integrity
-* Designed for analytics and history browsing
+* Cascading deletes for data integrity
+* Auto-initialized schema on first run
+* Perfect for single-user applications
 
 ---
 
@@ -214,7 +220,7 @@ Database queries are cached to improve performance.
 | OCR & AI         | Google Gemini AI |
 | Image Processing | OpenCV, PIL      |
 | Backend Logic    | Python           |
-| Database         | MySQL            |
+| Database         | SQLite           |
 | Data Handling    | Pandas           |
 | Visualization    | Plotly           |
 
@@ -242,7 +248,7 @@ streamlit run app.py
 ✅ Automatic image preprocessing
 ✅ Single-call AI-based OCR & extraction
 ✅ Structured JSON output
-✅ MySQL persistent storage
+✅ SQLite persistent storage (serverless, zero-config)
 ✅ Dashboard & history UI
 ✅ Error-resilient workflow
 
