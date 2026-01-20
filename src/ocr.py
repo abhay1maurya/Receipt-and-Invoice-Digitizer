@@ -42,18 +42,20 @@ def run_ocr_and_extract_bill(image: Image.Image, api_key: str) -> Dict:
     client = genai.Client(api_key=api_key)
 
     # Enforce deterministic JSON output to prevent Gemini hallucinations and markdown wrapping
+    # CRITICAL: Request raw OCR text as fallback for weak extractions
     prompt = (
-        "Extract receipt/invoice data.\n"
+        "Extract receipt/invoice data AND return the raw OCR text.\n"
         "Return ONLY valid JSON.\n"
         "Do NOT include explanations.\n"
-        "If a field is missing, use defaults.\n\n"
+        "If a field is missing or uncertain, return an empty string or null.\n\n"
         "Schema:\n"
         "{"
+        "\"ocr_text\": \"raw text from receipt (REQUIRED for fallback)\","
         "\"invoice_number\": string,"  # Invoice/Receipt ID or number
         "\"vendor_name\": string,"  # Store or business name
         "\"purchase_date\": \"YYYY-MM-DD\","  # Date format for database DATE type
         "\"purchase_time\": \"HH:MM\","  # Optional time of purchase
-        "\"currency\": \"USD\","  # ISO currency code (USD, INR, EUR, etc.)
+        "\"currency\": string,"  # ISO currency code (USD, INR, EUR, etc.)
         "\"items\": ["  # Array of line items
         " {\"s_no\": int, \"item_name\": string, \"quantity\": number, "
         "  \"unit_price\": number, \"item_total\": number}"
@@ -72,12 +74,13 @@ def run_ocr_and_extract_bill(image: Image.Image, api_key: str) -> Dict:
             contents=[prompt, image],  # Send both text prompt and image
             config={
                 "temperature": 0.0,  # Deterministic output for consistent extraction
-                "max_output_tokens": 4096,  # Enough for large receipts with many items
+                "max_output_tokens": 5096,  # Enough for large receipts with many items
                 "response_mime_type": "application/json"  # Force JSON response format
             },
         )
 
     except Exception as e:
+        
         # API call failed - network error, quota exceeded, invalid key, etc.
         return {"error": f"Gemini request failed: {e}"}
 
@@ -88,10 +91,58 @@ def run_ocr_and_extract_bill(image: Image.Image, api_key: str) -> Dict:
         # Gemini returned malformed JSON - return error with partial response
         return {
             "error": "Gemini returned invalid JSON (hard failure)",
-            "raw_response": response.text[:1000]  # First 1000 chars for debugging
+            "raw_response": response.text # First 1000 chars for debugging
         }
 
-    # NORMALIZATION STEP - Use normalizer module to standardize all fields
+    # STEP 2: EXTRACT RAW OCR TEXT (CRITICAL for fallback)
+    ocr_text = bill_data.get("ocr_text", "")
+    
+    # STEP 3: REGEX FALLBACK - Run before normalization
+    # Trigger fallback when fields are missing or weak (empty/null values)
+    from .extraction.field_extractor import extract_fields_from_ocr, is_field_weak
+    from .extraction.vendor_extractor import extract_vendor_name_nlp
+    
+    weak_fields = []  # Track which fields needed fallback
+    
+    # Check each critical field for weakness
+    if is_field_weak(bill_data.get("invoice_number")):
+        weak_fields.append("invoice_number")
+    if is_field_weak(bill_data.get("vendor_name")):
+        weak_fields.append("vendor_name")
+    if is_field_weak(bill_data.get("purchase_date")):
+        weak_fields.append("purchase_date")
+    if is_field_weak(bill_data.get("currency")):
+        weak_fields.append("currency")
+    if is_field_weak(bill_data.get("total_amount")):
+        weak_fields.append("total_amount")
+    
+    # If weak fields detected and OCR text available, run regex fallback
+    if weak_fields and ocr_text:
+        try:
+            regex_extracted = extract_fields_from_ocr(ocr_text)
+            
+            # Merge regex results ONLY for weak fields (don't override strong AI extractions)
+            for field in weak_fields:
+                if regex_extracted.get(field):
+                    bill_data[field] = regex_extracted[field]
+                    
+        except Exception as e:
+            # Regex fallback failed - log but don't crash
+            pass
+    
+    # STEP 3.5: VENDOR NLP FALLBACK - Only if vendor still weak after regex
+    # Use heuristic-based vendor extraction from OCR text headers
+    if is_field_weak(bill_data.get("vendor_name")) and ocr_text:
+        try:
+            vendor_nlp = extract_vendor_name_nlp(ocr_text)
+            if vendor_nlp:
+                bill_data["vendor_name"] = vendor_nlp
+        except Exception as e:
+            # Vendor NLP failed - continue without vendor
+            pass
+    
+    # STEP 4: NOW NORMALIZE (SAFE) - After regex fallback
+    # Use normalizer module to standardize all fields
     # This ensures consistent formatting for database storage and validation
     # Normalizer handles:
     #   - Date/time format conversion (YYYY-MM-DD, HH:MM:SS)

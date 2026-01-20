@@ -226,31 +226,6 @@ def page_dashboard():
             st.success(f"✅ Showing **{len(filtered_df)}** of **{len(bills_df)}** bills | Total: **${filtered_df['total_amount'].sum():,.2f}**")
         else:
             st.info(f"📊 Showing all **{len(bills_df)}** bills | Total: **${filtered_df['total_amount'].sum():,.2f}**")
-    
-    with summary_col2:
-        if st.button("📥 Export Data", use_container_width=True):
-            output = io.BytesIO()
-            with pd.ExcelWriter(output, engine='openpyxl') as writer:
-                export_bills = filtered_df.copy()
-                export_bills = export_bills.drop(columns=['purchase_date_dt'], errors='ignore')
-                export_bills.to_excel(writer, sheet_name='Bills', index=False)
-                
-                items = _cached_items(bills)
-                if items:
-                    items_df = pd.DataFrame(items)
-                    filtered_bill_ids = set(filtered_df["id"].values)
-                    export_items = items_df[items_df["bill_id"].isin(filtered_bill_ids)]
-                    export_items.to_excel(writer, sheet_name='Line Items', index=False)
-            
-            st.download_button(
-                label="💾 Download Excel",
-                data=output.getvalue(),
-                file_name=f"spending_report_{datetime.now().strftime('%Y%m%d')}.xlsx",
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                use_container_width=True
-            )
-    
-    st.divider()
 
     # Charts
     st.markdown("### 📊 Spending Analytics")
@@ -297,7 +272,7 @@ def page_dashboard():
         )
         fig1.update_xaxes(showgrid=False, showline=True, linewidth=1, linecolor='lightgray')
         fig1.update_yaxes(showgrid=True, gridwidth=1, gridcolor='rgba(128,128,128,0.1)')
-        st.plotly_chart(fig1, use_container_width=True)
+        st.plotly_chart(fig1, width="stretch")
 
     with col_chart2:
         st.markdown("#### 🧮 Tax % Contribution by Month")
@@ -334,7 +309,7 @@ def page_dashboard():
         )
         fig2.update_xaxes(showgrid=False, showline=True, linewidth=1, linecolor='lightgray')
         fig2.update_yaxes(showgrid=True, gridwidth=1, gridcolor='rgba(128,128,128,0.1)')
-        st.plotly_chart(fig2, use_container_width=True)
+        st.plotly_chart(fig2, width="stretch")
 
     st.divider()
 
@@ -350,9 +325,8 @@ def page_dashboard():
                 labels=by_vendor["vendor_name"],
                 values=by_vendor["total_amount"],
                 hole=0.4,
-                textinfo="label+percent",
-                textposition="outside",
-                hovertemplate="<b>%{label}</b><br>$%{value:,.2f}<br>%{percent}<extra></extra>",
+                textinfo="none",
+                # hovertemplate="<b>%{label}</b><br>$%{value:,.2f}<br>%{percent}<extra></extra>",
                 marker=dict(colors=px.colors.qualitative.Set3, line=dict(color='white', width=2)),
                 pull=[0.05] * len(by_vendor)
             )
@@ -377,7 +351,7 @@ def page_dashboard():
                     labels=payment_dist["payment_method"],
                     values=payment_dist["total_amount"],
                     hole=0.5,
-                    textinfo="label+percent",
+                    textinfo="none",
                     hovertemplate="<b>%{label}</b><br>$%{value:,.2f}<br>%{percent}<extra></extra>",
                     marker=dict(colors=px.colors.qualitative.Pastel, line=dict(color='white', width=2))
                 )
@@ -390,7 +364,7 @@ def page_dashboard():
                 paper_bgcolor='rgba(0,0,0,0)',
                 font=dict(family="Arial, sans-serif", size=11)
             )
-            st.plotly_chart(fig4, use_container_width=True)
+            st.plotly_chart(fig4, width="stretch")
         else:
             st.info("No payment method data available")
 
@@ -438,7 +412,7 @@ def page_dashboard():
         )
         fig5.update_xaxes(showgrid=False, showline=True, linewidth=1, linecolor='lightgray')
         fig5.update_yaxes(showgrid=True, gridwidth=1, gridcolor='rgba(128,128,128,0.1)')
-        st.plotly_chart(fig5, use_container_width=True)
+        st.plotly_chart(fig5, width="stretch")
 
     with col_chart6:
         st.markdown("#### 📊 Transaction Size Distribution")
@@ -463,7 +437,7 @@ def page_dashboard():
         )
         fig6.update_xaxes(showgrid=False, showline=True, linewidth=1, linecolor='lightgray')
         fig6.update_yaxes(showgrid=True, gridwidth=1, gridcolor='rgba(128,128,128,0.1)')
-        st.plotly_chart(fig6, use_container_width=True)
+        st.plotly_chart(fig6, width="stretch")
 
     st.divider()
 
@@ -547,7 +521,7 @@ def page_dashboard():
             )
             fig_freq.update_yaxes(categoryorder='total ascending')
             fig_freq.update_xaxes(showgrid=True, gridwidth=1, gridcolor='rgba(128,128,128,0.1)')
-            st.plotly_chart(fig_freq, use_container_width=True)
+            st.plotly_chart(fig_freq, width="stretch")
         else:
             st.info("No item data available")
     
@@ -565,7 +539,7 @@ def page_dashboard():
             )
             fig_spend.update_yaxes(categoryorder='total ascending')
             fig_spend.update_xaxes(showgrid=True, gridwidth=1, gridcolor='rgba(128,128,128,0.1)')
-            st.plotly_chart(fig_spend, use_container_width=True)
+            st.plotly_chart(fig_spend, width="stretch")
         else:
             st.info("No item data available")
     
@@ -747,7 +721,7 @@ def page_dashboard():
     
     with delete_col3:
         st.markdown("#### ")  # Spacer for alignment
-        if st.button("🗑️ Delete Bill", type="primary", disabled=not confirm_delete, use_container_width=True):
+        if st.button("🗑️ Delete Bill", type="primary", disabled=not confirm_delete, width="stretch"):
             try:
                 success = delete_bill(selected_delete_id)
                 if success:

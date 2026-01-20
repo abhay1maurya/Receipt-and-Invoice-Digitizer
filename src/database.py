@@ -84,40 +84,62 @@ def init_db():
     finally:
         conn.close()
 
-def detect_duplicate_bill_logical(bill_data: dict, user_id: int) -> bool:
-    """Check if a bill with same invoice number, vendor, date, and amount already exists.
-    
+def detect_duplicate_bill_logical(bill_data: dict, user_id: int) -> Dict[str, bool]:
+    """Detect likely duplicates using two tiers.
+
+    Strong match (blocks save): invoice_number present AND matches vendor + date + total (±0.02).
+    Soft match (warns only): invoice_number missing but vendor + date + total (±0.02) matches.
+
     Args:
         bill_data: Dictionary containing bill fields (invoice_number, vendor_name, purchase_date, total_amount)
         user_id: User ID to scope duplicate detection (currently unused but for future multi-user support)
-    
+
     Returns:
-        True if duplicate found, False otherwise
+        {"duplicate": bool, "soft_duplicate": bool}
     """
     invoice_number = bill_data.get("invoice_number")
     vendor = bill_data.get("vendor_name")
     purchase_date = bill_data.get("purchase_date")
     total_amount = float(bill_data.get("total_amount", 0))
 
-    if not invoice_number or not vendor or not purchase_date:
-        return False  # Cannot reliably detect duplicate without key fields
+    # Cannot compare without vendor/date
+    if not vendor or not purchase_date:
+        return {"duplicate": False, "soft_duplicate": False}
 
     conn = get_connection()
     try:
         cursor = conn.cursor()
+
+        if invoice_number:
+            cursor.execute(
+                """
+                SELECT bill_id
+                FROM bills
+                WHERE invoice_number = ?
+                  AND LOWER(vendor_name) = LOWER(?)
+                  AND purchase_date = ?
+                  AND ABS(total_amount - ?) <= 0.02
+                LIMIT 1
+                """,
+                (invoice_number, vendor, purchase_date, total_amount)
+            )
+            strong = cursor.fetchone() is not None
+            return {"duplicate": strong, "soft_duplicate": False}
+
+        # Soft match: no invoice number, rely on vendor/date/amount only
         cursor.execute(
             """
             SELECT bill_id
             FROM bills
-            WHERE invoice_number = ?
-              AND LOWER(vendor_name) = LOWER(?)
+            WHERE LOWER(vendor_name) = LOWER(?)
               AND purchase_date = ?
               AND ABS(total_amount - ?) <= 0.02
             LIMIT 1
             """,
-            (invoice_number, vendor, purchase_date, total_amount)
+            (vendor, purchase_date, total_amount)
         )
-        return cursor.fetchone() is not None
+        soft = cursor.fetchone() is not None
+        return {"duplicate": False, "soft_duplicate": soft}
     finally:
         conn.close()
 

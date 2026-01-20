@@ -7,7 +7,8 @@ CURRENCY_RATES_TO_USD = {
     "INR": 0.012,
     "MYR": 0.21,
     "EUR": 1.08,
-    "GBP": 1.27
+    "GBP": 1.27,
+    "RM" : 0.21
 }
 
 

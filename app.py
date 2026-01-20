@@ -66,8 +66,6 @@ if 'current_page_index' not in st.session_state:
     st.session_state.current_page_index = 0  # Index of currently viewed page in multi-page PDF
 if 'processed_pages' not in st.session_state:
     st.session_state.processed_pages = []  # Boolean list tracking which pages have been OCR'd
-if 'page_texts' not in st.session_state:
-    st.session_state.page_texts = []  # List of extracted text per page (for future multi-page merge)
 if 'processed_images' not in st.session_state:
     st.session_state.processed_images = []  # List of preprocessed PIL images per page
 
@@ -192,6 +190,10 @@ def page_upload_process():
             
             # Compare hash to detect file changes
             file_changed = current_file_hash != st.session_state.last_file_hash
+            # Warn user if the uploaded file hasn't changed from the last one
+            if not file_changed:
+                st.warning("⚠️ No changes detected. The uploaded file matches the last processed file.")
+            
             
             # Reset all processing state when a new file is uploaded
             # This prevents stale data from previous file being displayed
@@ -202,7 +204,6 @@ def page_upload_process():
                 st.session_state.ingestion_done = False
                 st.session_state.current_page_index = 0
                 st.session_state.processed_pages = []
-                st.session_state.page_texts = []
                 st.session_state.processed_images = []
                 st.session_state.document_processed = False
                 st.session_state.final_document_text = ""
@@ -234,7 +235,6 @@ def page_upload_process():
                     # Initialize per-page tracking arrays
                     num_pages = len(images)
                     st.session_state.processed_pages = [False] * num_pages
-                    st.session_state.page_texts = [""] * num_pages
                     st.session_state.processed_images = [None] * num_pages
                     
                     # Automatically preprocess all images for better OCR accuracy
@@ -300,29 +300,44 @@ def page_upload_process():
                             # 5. GEMINI OCR - Extract structured data with normalization
                             bill_data = run_ocr_and_extract_bill(target_img, st.session_state.api_key)
 
-                            # 6. VALIDATE - Check amount consistency (tax-inclusive/exclusive tolerant)
-                            validation = validate_bill_amounts(bill_data)
+                            save_allowed = True
+                            duplicate_detected = False
 
-                            if not validation["is_valid"]:
-                                st.warning(
-                                    "⚠ Bill amount validation failed. "
-                                    "Item totals and final total do not align. Please review."
-                                )
-
-
+                            # Check for OCR extraction errors first
                             if "error" in bill_data:
                                 st.error(f"❌ Extraction failed: {bill_data['error']}")
-                            else:
-                                # 7. DUPLICATE CHECK - Prevent duplicate bills by comparing key fields
-                                # Matches on: invoice_number + vendor_name + purchase_date + total_amount (±0.02)
-                                if detect_duplicate_bill_logical(bill_data, user_id=1):
+                                save_allowed = False
+                            
+                            # 6. VALIDATE - Check amount consistency (tax-inclusive/exclusive tolerant)
+                            if save_allowed:
+                                validation = validate_bill_amounts(bill_data)
+                                if not validation["is_valid"]:
                                     st.warning(
+                                        "⚠ Bill amount validation failed. "
+                                        "Item totals and final total do not align. Please review."
+                                    )
+                                    save_allowed = False
+                            
+                            # 7. DUPLICATE CHECK - Prevent duplicate bills by comparing key fields
+                            # Matches on: invoice_number + vendor_name + purchase_date + total_amount (±0.02)
+                            if save_allowed:
+                                dup_result = detect_duplicate_bill_logical(bill_data, user_id=1)
+                                if dup_result.get("duplicate"):
+                                    st.error(
                                         "⚠️ Duplicate bill detected! "
                                         "A bill with the same invoice number, vendor, date, and amount already exists."
                                     )
-                                    st.stop()
+                                    save_allowed = False
+                                    duplicate_detected = True
+                                elif dup_result.get("soft_duplicate"):
+                                    st.warning(
+                                        "⚠️ Possible duplicate (no invoice number). "
+                                        "Vendor/date/amount match an existing bill. Proceed if intentional."
+                                    )
                                 
-                                # 8. STORE - Save to session state and database
+                            
+                            # 8. STORE - Save to session state and database
+                            if save_allowed:
                                 st.session_state.final_document_text = ""
                                 st.session_state.extracted_bill_data = bill_data
                                 
@@ -334,9 +349,18 @@ def page_upload_process():
                                 # Streamlit's @st.cache_data(ttl=60) auto-refreshes on next access
                                 
                                 st.success(f"✅ Bill saved successfully! (ID: {bill_id})")
-                                
-                                # 10. DISPLAY - Rerun to show updated results and database tables
+                            
+                        # 10. DISPLAY - Rerun to show updated results and database tables
+                        if save_allowed:
+                            st.rerun()
+                        elif duplicate_detected:
+                            if st.button("Cancel and refresh", key="cancel_duplicate_single", type="secondary", icon="⏹"):
+                                st.session_state.extracted_bill_data = None
+                                st.session_state.bill_saved = False
+                                st.session_state.final_document_text = ""
                                 st.rerun()
+                        else:
+                            st.stop()
 
                 # WORKFLOW CASE B: Multi-page PDF processing
                 # Page-by-page navigation and individual save buttons
@@ -394,30 +418,57 @@ def page_upload_process():
                         with st.spinner(f"Processing page {current_idx + 1}..."):
                             # OCR + Normalize - Extract and standardize bill data
                             bill_data = run_ocr_and_extract_bill(target_img, st.session_state.api_key)
+
+                            save_allowed = True
+                            duplicate_detected = False
                             
+                            # Check for OCR extraction errors first
                             if "error" in bill_data:
                                 st.error(f"❌ Extraction failed: {bill_data['error']}")
-                            else:
-                                # Validate - Verify amount calculations
+                                save_allowed = False
+                            
+                            # Validate - Verify amount calculations
+                            if save_allowed:
                                 validation = validate_bill_amounts(bill_data)
                                 if not validation["is_valid"]:
                                     st.warning("⚠ Validation warning: Amounts may not align perfectly")
-                                
-                                # Duplicate Check - Prevent re-saving same bill from different pages
-                                if detect_duplicate_bill_logical(bill_data, user_id=1):
-                                    st.warning(
+                                    save_allowed = False
+                            
+                            # Duplicate Check - Prevent re-saving same bill from different pages
+                            if save_allowed:
+                                dup_result = detect_duplicate_bill_logical(bill_data, user_id=1)
+                                if dup_result.get("duplicate"):
+                                    st.error(
                                         "⚠️ Duplicate bill detected! "
                                         "A bill with the same invoice number, vendor, date, and amount already exists."
                                     )
-                                    st.stop()
-                                
-                                # Store - Save to database and update session state
+                                    save_allowed = False
+                                    duplicate_detected = True
+                                elif dup_result.get("soft_duplicate"):
+                                    st.warning(
+                                        "⚠️ Possible duplicate (no invoice number). "
+                                        "Vendor/date/amount match an existing bill. Proceed if intentional."
+                                    )
+                            
+                            # Store - Save to database and update session state
+                            if save_allowed:
                                 st.session_state.final_document_text = ""
                                 st.session_state.extracted_bill_data = bill_data
                                 bill_id = insert_bill(bill_data)
                                 st.session_state.bill_saved = True
                                 st.success(f"✅ Bill saved successfully! (ID: {bill_id})")
+                            
+                        # Rerun to show updated results
+                        if save_allowed:
+                            st.rerun()
+                        elif duplicate_detected:
+                            if st.button("Cancel and refresh", key=f"cancel_duplicate_page_{current_idx}", type="secondary", icon="⏹"):
+                                st.session_state.extracted_bill_data = None
+                                st.session_state.bill_saved = False
+                                st.session_state.final_document_text = ""
                                 st.rerun()
+                        else:
+                            st.stop()
 
     # COLUMN 2: RESULTS DISPLAY - shows extracted data and database tables
     with col2:
@@ -453,7 +504,6 @@ def page_upload_process():
                                 'invoice_number',
                                 'vendor_name',
                                 'purchase_date',
-                                'purchase_time',
                                 'payment_method',
                                 'total_amount',
                                 'tax_amount',

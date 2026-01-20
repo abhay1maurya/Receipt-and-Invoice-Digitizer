@@ -15,6 +15,35 @@ from .regex_patterns import (
 )
 
 
+# WEAK FIELD DETECTION - Critical for fallback triggering
+
+def is_field_weak(value) -> bool:
+    """
+    Determine if a field value is weak and needs regex fallback.
+    
+    A field is considered WEAK if:
+    - Value is None
+    - Value is empty string ""
+    - Value is 0 or 0.0 (for numeric fields)
+    - Value is empty list []
+    
+    Args:
+        value: Field value from Gemini extraction
+        
+    Returns:
+        bool: True if field is weak (needs fallback), False if strong (usable)
+    """
+    if value is None:
+        return True
+    if value == "":
+        return True
+    if value == 0 or value == 0.0:
+        return True
+    if isinstance(value, list) and len(value) == 0:
+        return True
+    return False
+
+
 # Generic helpers
 
 def _find_first(patterns: List[str], text: str) -> str:
@@ -65,7 +94,7 @@ def extract_currency(text: str) -> str:
     for currency, pattern in CURRENCY_PATTERNS.items():
         if re.search(pattern, text, re.IGNORECASE):
             return currency
-    return "USD"  # Default to USD; most common for international transactions
+    return ""
 
 
 def extract_payment_method(text: str) -> str:
