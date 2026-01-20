@@ -23,14 +23,14 @@ def get_connection():
 
 
 def init_db():
-    """Initialize SQLite database with required schema.
-    Creates bills and lineitems tables if they don't exist.
-    Safe to call multiple times - tables created only if missing."""
+    """Initialize SQLite database with clean, updated schema.
+    Creates bills and lineitems tables with all required fields.
+    Currency conversion fields included for multi-currency support."""
     conn = get_connection()
     try:
         cursor = conn.cursor()
         
-        # Create bills table (invoice header data)
+        # Bills table: stores invoice header data with currency conversion support
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS bills (
                 bill_id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -43,12 +43,15 @@ def init_db():
                 tax_amount DECIMAL(10, 2) DEFAULT 0,
                 total_amount DECIMAL(10, 2) DEFAULT 0,
                 currency VARCHAR(10) DEFAULT 'USD',
+                original_currency VARCHAR(10),
+                original_total_amount DECIMAL(10, 2),
+                exchange_rate DECIMAL(10, 6),
                 payment_method VARCHAR(50),
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         """)
         
-        # Create lineitems table (individual line items)
+        # Line items table: stores individual items from each bill
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS lineitems (
                 item_id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -61,29 +64,43 @@ def init_db():
             )
         """)
         
-        # Create indexes for better query performance
+        # Performance indexes for fast queries
         cursor.execute("""
             CREATE INDEX IF NOT EXISTS idx_bills_purchase_date 
             ON bills(purchase_date)
         """)
         
         cursor.execute("""
+            CREATE INDEX IF NOT EXISTS idx_bills_vendor 
+            ON bills(vendor_name)
+        """)
+        
+        cursor.execute("""
             CREATE INDEX IF NOT EXISTS idx_lineitems_bill_id 
             ON lineitems(bill_id)
         """)
-        
+
         conn.commit()
     finally:
         conn.close()
 
 def detect_duplicate_bill_logical(bill_data: dict, user_id: int) -> bool:
+    """Check if a bill with same invoice number, vendor, date, and amount already exists.
+    
+    Args:
+        bill_data: Dictionary containing bill fields (invoice_number, vendor_name, purchase_date, total_amount)
+        user_id: User ID to scope duplicate detection (currently unused but for future multi-user support)
+    
+    Returns:
+        True if duplicate found, False otherwise
+    """
     invoice_number = bill_data.get("invoice_number")
     vendor = bill_data.get("vendor_name")
     purchase_date = bill_data.get("purchase_date")
     total_amount = float(bill_data.get("total_amount", 0))
 
     if not invoice_number or not vendor or not purchase_date:
-        return False  # Cannot reliably detect duplicate
+        return False  # Cannot reliably detect duplicate without key fields
 
     conn = get_connection()
     try:
@@ -106,50 +123,62 @@ def detect_duplicate_bill_logical(bill_data: dict, user_id: int) -> bool:
 
 
 def insert_bill(bill_data: Dict, user_id: int = 1, currency: str = "USD", file_path: Optional[str] = None) -> int:
-    """Insert a bill and its line items into SQLite database.
-
-    Tables:
-        - bills(bill_id, user_id, vendor_name, purchase_date, purchase_time, total_amount, tax_amount, currency, payment_method)
-        - lineitems(item_id, bill_id, description, quantity, unit_price, total_price)
-
-    Returns the newly created bill_id.
+    """Insert a bill and its line items into the database.
+    
+    Args:
+        bill_data: Dictionary containing bill fields and items array
+        user_id: User ID for multi-user support (default: 1)
+        currency: Target currency (default: 'USD', already converted by currency_converter)
+        file_path: Optional source file path (unused, kept for API compatibility)
+    
+    Returns:
+        Newly created bill_id
+    
+    Raises:
+        Exception: Database insertion error (rolls back transaction)
     """
     conn = get_connection()
     try:
         cursor = conn.cursor()
 
-        # Provide sensible defaults because OCR extraction can be incomplete or inconsistent
+        # Extract fields with sensible defaults for incomplete OCR data
         invoice_number = bill_data.get("invoice_number") or None
         vendor = bill_data.get("vendor_name") or "Unknown"
-        
-        # Schema requires purchase_date; use today if OCR didn't detect it
         purchase_date = bill_data.get("purchase_date") or datetime.today().strftime("%Y-%m-%d")
         purchase_time = bill_data.get("purchase_time") or None
-        
+        subtotal = bill_data.get("subtotal", 0) or 0
         tax_amount = bill_data.get("tax_amount", 0) or 0
         total_amount = bill_data.get("total_amount", 0) or 0
-        # Normalizer already calculated subtotal; extract it
-        subtotal = bill_data.get("subtotal", 0) or 0
-        currency_value = bill_data.get("currency", currency)
         payment_method = bill_data.get("payment_method") or None
+        
+        # Currency conversion fields (preserved from original bill)
+        currency_value = bill_data.get("currency", currency)
+        original_currency = bill_data.get("original_currency")
+        original_total_amount = bill_data.get("original_total_amount")
+        exchange_rate = bill_data.get("exchange_rate")
 
-        # Insert bill header data into bills table (SQLite uses ? placeholders)
+        # Insert bill header into bills table
         cursor.execute(
             """
-            INSERT INTO bills (user_id, invoice_number, vendor_name, purchase_date, purchase_time, subtotal, tax_amount, total_amount, currency, payment_method)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO bills (
+                user_id, invoice_number, vendor_name, purchase_date, purchase_time,
+                subtotal, tax_amount, total_amount, currency,
+                original_currency, original_total_amount, exchange_rate, payment_method
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
-            (user_id, invoice_number, vendor, purchase_date, purchase_time, subtotal, tax_amount, total_amount, currency_value, payment_method),
+            (user_id, invoice_number, vendor, purchase_date, purchase_time,
+             subtotal, tax_amount, total_amount, currency_value,
+             original_currency, original_total_amount, exchange_rate, payment_method),
         )
-        # Get auto-generated bill_id for linking line items
         bill_id = cursor.lastrowid
 
-        # Process items from OCR output
+        # Insert line items
         items = bill_data.get("items", []) or []
-        for s_no, item in enumerate(items, 1):
+        for item in items:
             description = item.get("item_name", "")
             
-            # OCR often returns quantity as string; convert safely with rounding for fractional quantities
+            # Safely convert quantity to integer
             qty_val = item.get("quantity") or 0
             try:
                 qty = int(round(float(qty_val)))
@@ -157,11 +186,8 @@ def insert_bill(bill_data: Dict, user_id: int = 1, currency: str = "USD", file_p
                 qty = 0
                 
             unit_price = item.get("unit_price") or 0
-            
-            # Use item_total if available; calculate fallback to catch OCR math errors
             total_price = item.get("item_total") or (qty * unit_price)
             
-            # Insert line item row
             cursor.execute(
                 """
                 INSERT INTO lineitems (bill_id, description, quantity, unit_price, total_price)
@@ -170,21 +196,21 @@ def insert_bill(bill_data: Dict, user_id: int = 1, currency: str = "USD", file_p
                 (bill_id, description, qty, unit_price, total_price),
             )
 
-        # Commit transaction - preserves atomicity if bill_id is needed downstream
         conn.commit()
         return bill_id
     except Exception as e:
-        # Rollback ensures partial inserts don't corrupt database if any step fails
         conn.rollback()
-        raise e  # Re-raise exception for caller to handle
+        raise e
     finally:
-        # Always close connection to free resources
         conn.close()
 
 
 def get_all_bills() -> List[Dict]:
-    """Fetch all bills from database with app-friendly key mapping.
-    Returns rows sorted by newest first."""
+    """Fetch all bills from database with standardized key mapping.
+    
+    Returns:
+        List of bill dictionaries sorted by newest first, with consistent field types
+    """
     conn = get_connection()
     try:
         cursor = conn.cursor()
@@ -194,30 +220,37 @@ def get_all_bills() -> List[Dict]:
                    invoice_number,
                    vendor_name,
                    purchase_date,
-                   total_amount,
+                   purchase_time,
+                   subtotal,
                    tax_amount,
+                   total_amount,
                    currency,
-                   payment_method,
-                   purchase_time
+                   original_currency,
+                   original_total_amount,
+                   exchange_rate,
+                   payment_method
             FROM bills
             ORDER BY bill_id DESC
             """
         )
         rows = cursor.fetchall()
         bills = []
-        # Transform each row to ensure consistent data types and handle nulls
         for r in rows:
             bills.append(
                 {
                     "id": r["id"],
                     "invoice_number": r["invoice_number"],
                     "vendor_name": r["vendor_name"],
-                    "purchase_date": r["purchase_date"],  # May be None if not provided
-                    "total_amount": float(r["total_amount"] or 0),  # Convert to float
-                    "tax_amount": float(r["tax_amount"] or 0),
-                    "currency": r["currency"] or "USD",
-                    "payment_method": r["payment_method"],
+                    "purchase_date": r["purchase_date"],
                     "purchase_time": r["purchase_time"],
+                    "subtotal": float(r["subtotal"] or 0),
+                    "tax_amount": float(r["tax_amount"] or 0),
+                    "total_amount": float(r["total_amount"] or 0),
+                    "currency": r["currency"] or "USD",
+                    "original_currency": r["original_currency"],
+                    "original_total_amount": float(r["original_total_amount"]) if r["original_total_amount"] else None,
+                    "exchange_rate": float(r["exchange_rate"]) if r["exchange_rate"] else None,
+                    "payment_method": r["payment_method"],
                 }
             )
         return bills
@@ -226,16 +259,13 @@ def get_all_bills() -> List[Dict]:
 
 
 def get_bill_items(bill_id: int) -> List[Dict]:
-    """Fetch all line items for a specific invoice.
+    """Fetch all line items for a specific bill.
     
     Args:
         bill_id: Primary key of bill to fetch items for
     
     Returns:
-        List of dictionaries containing line item data with renamed columns:
-        - description -> item_name (matches OCR extraction keys)
-        - total_price -> item_total (consistent with app naming)
-        - s_no added as sequential number for display purposes
+        List of line items with standardized field names and sequential numbering
     """
     conn = get_connection()
     try:
@@ -255,14 +285,13 @@ def get_bill_items(bill_id: int) -> List[Dict]:
         )
         rows = cursor.fetchall()
         items = []
-        # Add sequential numbering for display in tables
         for idx, r in enumerate(rows, 1):
             items.append(
                 {
-                    "s_no": idx,  # Serial number for table display
+                    "s_no": idx,
                     "item_name": r["item_name"] or "",
                     "quantity": r["quantity"] or 0,
-                    "unit_price": float(r["unit_price"] or 0),  # Convert to float
+                    "unit_price": float(r["unit_price"] or 0),
                     "item_total": float(r["item_total"] or 0),
                 }
             )
@@ -272,17 +301,13 @@ def get_bill_items(bill_id: int) -> List[Dict]:
 
 
 def get_bill_details(bill_id: int) -> Optional[Dict]:
-    """Fetch complete bill data including invoice header and all line items.
+    """Fetch complete bill data including header and all line items.
     
     Args:
         bill_id: Primary key of bill to fetch
     
     Returns:
-        Dictionary containing complete bill data with both header and items,
-        or None if bill_id not found.
-    
-    Note: Includes calculated fields (subtotal) and placeholder fields
-    (purchase_time, payment_method) for backward compatibility.
+        Complete bill dictionary with header fields and items array, or None if not found
     """
     conn = get_connection()
     try:
@@ -294,8 +319,8 @@ def get_bill_details(bill_id: int) -> Optional[Dict]:
                    purchase_date,
                    purchase_time,
                    subtotal,
-                   total_amount,
                    tax_amount,
+                   total_amount,
                    currency,
                    payment_method
             FROM bills
@@ -305,30 +330,27 @@ def get_bill_details(bill_id: int) -> Optional[Dict]:
         )
         row = cursor.fetchone()
         if not row:
-            return None  # Bill not found in database
+            return None
 
-        # Build complete bill dictionary with stored and placeholder fields
         bill = {
             "id": row["id"],
             "vendor_name": row["vendor_name"],
             "purchase_date": row["purchase_date"],
             "purchase_time": row["purchase_time"],
             "subtotal": float(row["subtotal"] or 0),
-            "discount": 0.0,  # Not stored in current schema
             "tax_amount": float(row["tax_amount"] or 0),
             "total_amount": float(row["total_amount"] or 0),
-            "payment_method": row["payment_method"] or "",
             "currency": row["currency"] or "USD",
+            "payment_method": row["payment_method"] or "",
+            "items": get_bill_items(bill_id)
         }
-        # Attach line items to complete the bill details
-        bill["items"] = get_bill_items(bill_id)
         return bill
     finally:
         conn.close()
 
 
 def delete_bill(bill_id: int) -> bool:
-    """Delete a bill from the database.
+    """Delete a bill and its associated line items from the database.
     
     Args:
         bill_id: Primary key of bill to delete
@@ -337,18 +359,15 @@ def delete_bill(bill_id: int) -> bool:
         True if bill was deleted, False if bill_id not found
     
     Note: Line items are automatically deleted via CASCADE constraint
-    defined in the database schema.
     """
     conn = get_connection()
     try:
         cursor = conn.cursor()
-        # Execute delete query with bill_id parameter
         cursor.execute("DELETE FROM bills WHERE bill_id = ?", (bill_id,))
         conn.commit()
-        # Check if any rows were deleted (rowcount > 0 means bill existed)
         return cursor.rowcount > 0
     except Exception as e:
-        conn.rollback()  # Undo changes on error
-        raise e  # Re-raise for caller to handle
+        conn.rollback()
+        raise e
     finally:
         conn.close()

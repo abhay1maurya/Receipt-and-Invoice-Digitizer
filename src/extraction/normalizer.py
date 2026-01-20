@@ -90,7 +90,7 @@ def normalize_items(items: List[Dict]) -> List[Dict]:
 
         normalized.append({
             "s_no": item.get("s_no", idx),
-            "item_name": _safe_str(item.get("item_name")),
+            "item_name": _safe_str(item.get("item_name")).upper(),
             "quantity": quantity,
             "unit_price": unit_price,
             "item_total": round(_safe_float(item_total), 2),  # Consistent precision
@@ -109,10 +109,10 @@ def normalize_extracted_fields(extracted: Dict) -> Dict:
     This is called by ocr.py after Gemini extraction to standardize data.
     """
     # Enforce database VARCHAR length limits to prevent constraint violations
-    invoice_number = _safe_str(extracted.get("invoice_number"))[:100]
-    vendor_name = _safe_str(extracted.get("vendor_name", "Unknown"))[:255]
+    invoice_number = _safe_str(extracted.get("invoice_number")).upper()[:100]
+    vendor_name = _safe_str(extracted.get("vendor_name", "Unknown")).upper()[:255]
     currency = _safe_str(extracted.get("currency", "USD")).upper()[:10]
-    payment_method = _safe_str(extracted.get("payment_method"))[:50]
+    payment_method = _safe_str(extracted.get("payment_method")).upper()[:50]
     
     # Safe conversion prevents "1000.50" string from crashing calculations
     subtotal = _safe_float(extracted.get("subtotal"))

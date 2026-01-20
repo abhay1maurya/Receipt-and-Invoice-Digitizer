@@ -10,6 +10,7 @@ import re
 
 # Import normalizer for data standardization after Gemini extraction
 from .extraction.normalizer import normalize_extracted_fields
+from .extraction.currency_converter import convert_to_usd
 
 def run_ocr_and_extract_bill(image: Image.Image, api_key: str) -> Dict:
     """Extract structured bill data from image using Gemini AI.
@@ -99,6 +100,12 @@ def run_ocr_and_extract_bill(image: Image.Image, api_key: str) -> Dict:
     #   - Default values for missing fields
     #   - Type safety (safe conversions with fallbacks)
     normalized_data = normalize_extracted_fields(bill_data)
+    # Ensure backward compatibility for converter expecting 'tax' key
+    if "tax" not in normalized_data:
+        normalized_data["tax"] = normalized_data.get("tax_amount", 0)
+
+    # Currency conversion: convert monetary fields to USD while preserving originals
+    converted_data = convert_to_usd(normalized_data)
     
-    # Return fully normalized and validated data ready for storage
-    return normalized_data
+    # Return fully normalized and currency-converted data ready for validation/storage
+    return converted_data

@@ -10,6 +10,7 @@ import os
 import pandas as pd
 import plotly.graph_objects as go
 import plotly.express as px
+from dashboard import page_dashboard
 
 # PAGE CONFIGURATION - Sets up browser tab title, icon, and layout
 st.set_page_config(
@@ -136,44 +137,6 @@ with st.sidebar:
     st.link_button(label="Repo", url="https://github.com/abhay1maurya/Receipt-and-Invoice-Digitizer")
     st.info("ℹ️ v1.0.0-beta")
 
-# Cached data loaders to avoid repeat database queries on every rerun
-# Cache expires after 60 seconds to balance performance vs data freshness
-# These functions are called multiple times across dashboard/upload/history pages
-
-@st.cache_data(ttl=60, show_spinner=False)
-def _cached_bills():
-    """Fetch all bills from database with 60s cache.
-    Returns empty list on error to prevent page crashes."""
-    try:
-        return get_all_bills() or []
-    except Exception as e:
-        st.warning(f"Could not load bills: {e}")
-        return []
-
-
-@st.cache_data(ttl=60, show_spinner=False)
-def _cached_items(bills):
-    """Fetch all line items for given bills and enrich with bill metadata.
-    Returns flattened list of items with vendor_name and purchase_date attached."""
-    items = []
-    for bill in bills:
-        try:
-            bill_items = get_bill_items(bill.get("id"))
-        except Exception:
-            bill_items = []
-        # Enrich each item with parent bill information for easier analysis
-        for item in bill_items:
-            items.append(
-                {
-                    **item,
-                    "bill_id": bill.get("id"),
-                    "vendor_name": bill.get("vendor_name"),
-                    "purchase_date": bill.get("purchase_date"),
-                }
-            )
-    return items
-
-
 # Dialog function to display uploaded image in a modal popup
 @st.dialog("📷 Uploaded Image")
 def show_uploaded_image_dialog(image, caption):
@@ -183,157 +146,6 @@ def show_uploaded_image_dialog(image, caption):
         caption: Title/caption for the image"""
     st.image(image, caption=caption, width="stretch")
     st.info("Click outside the dialog to close.")
-
-
-# PAGE: DASHBOARD - displays spending analytics, charts, and recent bills
-def page_dashboard():
-    st.title("My Spending Dashboard")
-    st.markdown("Live view of your saved receipts and invoices.")
-    st.divider()
-
-    # Load bills from database with caching
-    bills = _cached_bills()
-    if not bills:
-        st.info("📭 No bills saved yet. Upload and save a bill to see your dashboard populate.")
-        return
-
-    # Convert to DataFrame for pandas/plotly operations
-    bills_df = pd.DataFrame(bills)
-    # Parse purchase_date strings into datetime objects for time-series analysis
-    bills_df["purchase_date_dt"] = pd.to_datetime(bills_df.get("purchase_date"), errors="coerce")
-
-    # Calculate summary metrics from bills data
-    total_spent = bills_df["total_amount"].sum()  # Sum of all bill totals
-    months_active = bills_df["purchase_date_dt"].dt.to_period("M").nunique() or 1  # Unique months with bills
-    avg_per_month = total_spent / months_active  # Average monthly spending
-    vendors_count = bills_df["vendor_name"].nunique()  # Count of unique vendors
-    transactions_count = len(bills_df)  # Total number of bills
-
-    # Display metrics in 4-column layout
-    col1, col2, col3, col4 = st.columns(4)
-    with col1:
-        st.metric(label="Total Spent", value=f"${total_spent:,.2f}")
-    with col2:
-        st.metric(label="Avg. Spent/Month", value=f"${avg_per_month:,.2f}")
-    with col3:
-        st.metric(label="Total Vendors", value=str(vendors_count))
-    with col4:
-        st.metric(label="Total Transactions", value=str(transactions_count))
-
-    st.divider()
-
-    # Charts section - two-column layout for visualizations
-    col_chart1, col_chart2 = st.columns(2)
-
-    with col_chart1:
-        st.subheader("📈 Monthly Spending Trend")
-        # Group bills by month and sum total_amount for trend analysis
-        monthly = (
-            bills_df.dropna(subset=["purchase_date_dt"])  # Exclude bills with invalid dates
-            .groupby(bills_df["purchase_date_dt"].dt.to_period("M"))["total_amount"]
-            .sum()
-            .reset_index()
-        )
-        monthly["month"] = monthly["purchase_date_dt"].dt.strftime("%Y-%m")  # Format for display
-        # Create line chart with Plotly
-        fig1 = go.Figure()
-        fig1.add_trace(
-            go.Scatter(
-                x=monthly["month"],
-                y=monthly["total_amount"],
-                mode="lines+markers",
-                name="Spending",
-                line=dict(color="#3498db", width=3),
-                marker=dict(size=8),
-            )
-        )
-        fig1.update_layout(
-            hovermode="x unified",
-            height=350,
-            margin=dict(l=0, r=0, t=20, b=0),
-            yaxis_title="Amount ($)",
-            xaxis_title="Month",
-            showlegend=False,
-        )
-        st.plotly_chart(fig1, width=1200)
-
-    with col_chart2:
-        st.subheader("🏪 Spending by Vendor")
-        # Aggregate spending by vendor and sort descending
-        by_vendor = bills_df.groupby("vendor_name")["total_amount"].sum().sort_values(ascending=False).reset_index()
-        # Create bar chart with color gradient based on amount
-        fig2 = px.bar(
-            by_vendor,
-            x="vendor_name",
-            y="total_amount",
-            color="total_amount",
-            color_continuous_scale="Blues",  # Darker blue for higher amounts
-            height=350,
-        )
-        fig2.update_layout(margin=dict(l=0, r=0, t=20, b=0), yaxis_title="Amount ($)", xaxis_title="Vendor", showlegend=False)
-        st.plotly_chart(fig2, width=1200)
-
-    st.divider()
-
-    # Top vendors and items tables - two-column layout
-    col_vendors, col_items = st.columns(2)
-
-    with col_vendors:
-        st.subheader("🔝 Top Vendors (by spend)")
-        # Show top 10 vendors by total spending
-        top_vendors = by_vendor.head(10)
-        st.dataframe(
-            top_vendors.rename(columns={"vendor_name": "Vendor", "total_amount": "Spent ($)"}),
-            hide_index=True,
-            width="stretch",
-        )
-
-    with col_items:
-        st.subheader("⭐ Top Items (by spend)")
-        # Load line items from database with bill metadata
-        items = _cached_items(bills)
-        if items:
-            items_df = pd.DataFrame(items)
-            # Convert item_total to numeric, handling any malformed values
-            items_df["item_total"] = pd.to_numeric(items_df.get("item_total"), errors="coerce").fillna(0)
-            # Group by item name and sum totals across all bills
-            top_items = (
-                items_df.groupby("item_name")["item_total"]
-                .sum()
-                .sort_values(ascending=False)
-                .reset_index()
-                .head(10)  # Top 10 most expensive items
-            )
-            st.dataframe(
-                top_items.rename(columns={"item_name": "Item", "item_total": "Spent ($)"}),
-                hide_index=True,
-                width="stretch",
-            )
-        else:
-            st.info("No line items available yet.")
-
-    st.divider()
-
-    # Recent transactions table - shows latest 20 bills
-    st.subheader("📋 Recent Bills")
-    recent_cols = [
-        "id",
-        "invoice_number",
-        "vendor_name",
-        "purchase_date",
-        "purchase_time",
-        "payment_method",
-        "total_amount",
-        "tax_amount",
-        "currency",
-    ]
-    # Sort by date descending to show most recent first
-    recent = bills_df.sort_values(by="purchase_date_dt", ascending=False).head(20)
-    recent_display = recent[recent_cols].copy()
-    # Format currency columns for display
-    recent_display["total_amount"] = recent_display["total_amount"].apply(lambda x: f"${x:.2f}")
-    recent_display["tax_amount"] = recent_display["tax_amount"].apply(lambda x: f"${x:.2f}")
-    st.dataframe(recent_display, hide_index=True, width="stretch")
 
 
 # PAGE: UPLOAD & PROCESS - handles file upload, preprocessing, OCR, and database save
