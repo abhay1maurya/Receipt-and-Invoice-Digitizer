@@ -129,7 +129,6 @@ def run_ocr_and_extract_bill(image: Image.Image, api_key: str) -> Dict:
     # STEP 3: REGEX FALLBACK - Run before normalization
     # Trigger fallback when fields are missing or weak (empty/null values)
     from .extraction.field_extractor import extract_fields_from_ocr, is_field_weak
-    from .extraction.vendor_extractor import extract_vendor_name_nlp
     
     weak_fields = []  # Track which fields needed fallback
     
@@ -159,17 +158,16 @@ def run_ocr_and_extract_bill(image: Image.Image, api_key: str) -> Dict:
             # Regex fallback failed - log but don't crash
             pass
     
-    # STEP 3.5: VENDOR NLP FALLBACK - Only if vendor still weak after regex
-    # Use heuristic-based vendor extraction from OCR text headers
+    # STEP 3B: spaCy NER Vendor Fallback
+    # Use Named Entity Recognition as second-level fallback if vendor_name is still weak
+    # spaCy identifies ORG entities; often better for noisy OCR than pure regex
     if is_field_weak(bill_data.get("vendor_name")) and ocr_text:
-        try:
-            vendor_nlp = extract_vendor_name_nlp(ocr_text)
-            if vendor_nlp:
-                bill_data["vendor_name"] = vendor_nlp
-        except Exception as e:
-            # Vendor NLP failed - continue without vendor
-            pass
-    
+        from .extraction.vendor_extractor_spacy import extract_vendor_spacy
+        
+        vendor_spacy = extract_vendor_spacy(ocr_text)
+        if vendor_spacy:
+            bill_data["vendor_name"] = vendor_spacy
+
     # STEP 4: NOW NORMALIZE (SAFE) - After regex fallback
     # Use normalizer module to standardize all fields
     # This ensures consistent formatting for database storage and validation
