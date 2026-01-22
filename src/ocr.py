@@ -74,7 +74,7 @@ def run_ocr_and_extract_bill(image: Image.Image, api_key: str) -> Dict:
             contents=[prompt, image],  # Send both text prompt and image
             config={
                 "temperature": 0.0,  # Deterministic output for consistent extraction
-                "max_output_tokens": 5096,  # Enough for large receipts with many items
+                "max_output_tokens": 4096,  # Enough for large receipts with many items
                 "response_mime_type": "application/json"  # Force JSON response format
             },
         )
@@ -85,17 +85,46 @@ def run_ocr_and_extract_bill(image: Image.Image, api_key: str) -> Dict:
         return {"error": f"Gemini request failed: {e}"}
 
     # Parse JSON response from Gemini
+    bill_data = None
+    ocr_text = ""
+    json_parse_failed = False
+    
     try:
         bill_data = json.loads(response.text)
+        ocr_text = bill_data.get("ocr_text", "")
     except Exception as e:
-        # Gemini returned malformed JSON - return error with partial response
-        return {
-            "error": "Gemini returned invalid JSON (hard failure)",
-            "raw_response": response.text # First 1000 chars for debugging
+        # JSON parsing failed - attempt to extract ocr_text from raw response
+        json_parse_failed = True
+        
+        # Try to extract ocr_text field even if JSON is malformed
+        # Pattern: "ocr_text": "..." (handles escaped quotes)
+        ocr_match = re.search(r'"ocr_text"\s*:\s*"((?:\\.|[^"\\])*)"', response.text)
+        if ocr_match:
+            ocr_text = ocr_match.group(1)
+            # Unescape the string
+            ocr_text = ocr_text.replace('\\"', '"').replace('\\n', '\n').replace('\\\\', '\\')
+        
+        # If we extracted ocr_text, attempt regex fallback instead of hard failure
+        if not ocr_text:
+            return {
+                "error": "Gemini returned invalid JSON (hard failure) and no OCR text could be extracted",
+                "raw_response": response.text[:2000]  # Capture first 2000 chars for debugging
+            }
+        
+        # Initialize empty bill_data for fallback processing
+        bill_data = {
+            "ocr_text": ocr_text,
+            "invoice_number": None,
+            "vendor_name": None,
+            "purchase_date": None,
+            "purchase_time": None,
+            "currency": None,
+            "items": [],
+            "tax_amount": 0,
+            "total_amount": 0,
+            "payment_method": None
         }
 
-    # STEP 2: EXTRACT RAW OCR TEXT (CRITICAL for fallback)
-    ocr_text = bill_data.get("ocr_text", "")
     
     # STEP 3: REGEX FALLBACK - Run before normalization
     # Trigger fallback when fields are missing or weak (empty/null values)
@@ -116,13 +145,13 @@ def run_ocr_and_extract_bill(image: Image.Image, api_key: str) -> Dict:
     if is_field_weak(bill_data.get("total_amount")):
         weak_fields.append("total_amount")
     
-    # If weak fields detected and OCR text available, run regex fallback
-    if weak_fields and ocr_text:
+    # Always trigger regex fallback if JSON parse failed (best-effort recovery)
+    if json_parse_failed or (weak_fields and ocr_text):
         try:
             regex_extracted = extract_fields_from_ocr(ocr_text)
             
-            # Merge regex results ONLY for weak fields (don't override strong AI extractions)
-            for field in weak_fields:
+            # Merge regex results for weak or missing fields
+            for field in weak_fields + (["invoice_number", "vendor_name", "purchase_date", "currency", "total_amount"] if json_parse_failed else []):
                 if regex_extracted.get(field):
                     bill_data[field] = regex_extracted[field]
                     
@@ -151,12 +180,10 @@ def run_ocr_and_extract_bill(image: Image.Image, api_key: str) -> Dict:
     #   - Default values for missing fields
     #   - Type safety (safe conversions with fallbacks)
     normalized_data = normalize_extracted_fields(bill_data)
-    # Ensure backward compatibility for converter expecting 'tax' key
-    if "tax" not in normalized_data:
-        normalized_data["tax"] = normalized_data.get("tax_amount", 0)
 
     # Currency conversion: convert monetary fields to USD while preserving originals
     converted_data = convert_to_usd(normalized_data)
+
     
     # Return fully normalized and currency-converted data ready for validation/storage
     return converted_data

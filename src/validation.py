@@ -1,3 +1,8 @@
+from typing import Dict
+
+from .duplicate import detect_duplicate_bill_logical
+
+
 def validate_bill_amounts(bill_data, tolerance=0.02):
     """
     Validates bill totals safely without assuming tax-inclusive or tax-exclusive pricing.
@@ -38,4 +43,45 @@ def validate_bill_amounts(bill_data, tolerance=0.02):
         "tax_amount": round(tax_amount, 2),
         "total_amount": round(total, 2),
         "errors": errors
+    }
+
+
+def validate_bill_complete(bill_data: dict, user_id: int = 1) -> Dict:
+    """Unified validation function that checks both amount validation and duplicate detection.
+    
+    Args:
+        bill_data: Dictionary containing bill fields and items
+        user_id: User ID for duplicate detection scope
+    
+    Returns:
+        {
+            "amount_validation": {...},  # Result from validate_bill_amounts
+            "duplicate_check": {...},    # Result from detect_duplicate_bill_logical
+            "can_save": bool,            # True only if amounts valid and no hard duplicate
+            "warnings": []                # List of warning messages
+        }
+    """
+    # Check amount validation
+    amount_validation = validate_bill_amounts(bill_data)
+    
+    # Check for duplicates
+    duplicate_check = detect_duplicate_bill_logical(bill_data, user_id)
+    
+    # Determine if save is allowed
+    can_save = amount_validation["is_valid"] and not duplicate_check["duplicate"]
+    
+    # Build warnings
+    warnings = []
+    if not amount_validation["is_valid"]:
+        warnings.append("Amount validation failed")
+    if duplicate_check["duplicate"]:
+        warnings.append("Hard duplicate detected - save blocked")
+    if duplicate_check["soft_duplicate"]:
+        warnings.append("Soft duplicate detected - similar bill exists")
+    
+    return {
+        "amount_validation": amount_validation,
+        "duplicate_check": duplicate_check,
+        "can_save": can_save,
+        "warnings": warnings
     }

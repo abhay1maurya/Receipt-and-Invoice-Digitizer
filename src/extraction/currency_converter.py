@@ -39,8 +39,7 @@ def convert_to_usd(bill_data: Dict) -> Dict:
 
     # Convert header values
     bill_data["subtotal"] = safe_mul(bill_data.get("subtotal", 0))
-    bill_data["tax"] = safe_mul(bill_data.get("tax", 0))
-    bill_data["tax_amount"] = bill_data["tax"]
+    bill_data["tax_amount"] = safe_mul(bill_data.get("tax_amount", 0))
     bill_data["total_amount"] = safe_mul(bill_data.get("total_amount", 0))
 
     # Convert line items

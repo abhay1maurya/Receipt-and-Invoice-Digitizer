@@ -7,6 +7,7 @@
 import streamlit as st
 import sys
 import os
+import time
 import pandas as pd
 import plotly.graph_objects as go
 import plotly.express as px
@@ -35,8 +36,8 @@ try:
     from src.preprocessing import preprocess_image
     from src.ocr import run_ocr_and_extract_bill  # Internally uses normalizer
     from src.ingestion import ingest_document, generate_file_hash
-    from src.database import init_db, insert_bill, get_all_bills, get_bill_items, get_bill_details, detect_duplicate_bill_logical
-    from src.validation import validate_bill_amounts
+    from src.database import init_db, insert_bill, get_all_bills, get_bill_items, get_bill_details
+    from src.validation import validate_bill_complete
 except ImportError as e:
     st.warning(f"⚠️ Module Import Warning: {e}")
 
@@ -308,33 +309,43 @@ def page_upload_process():
                                 st.error(f"❌ Extraction failed: {bill_data['error']}")
                                 save_allowed = False
                             
-                            # 6. VALIDATE - Check amount consistency (tax-inclusive/exclusive tolerant)
+                            # 6. VALIDATE - Unified validation: checks amounts AND duplicates
                             if save_allowed:
-                                validation = validate_bill_amounts(bill_data)
-                                if not validation["is_valid"]:
+                                validation_result = validate_bill_complete(bill_data, user_id=1)
+                                amount_validation = validation_result["amount_validation"]
+
+                                # Check amount validation; if it fails, save using calculated amounts
+                                if not amount_validation["is_valid"]:
+                                    time.sleep(1)
                                     st.warning(
-                                        "⚠ Bill amount validation failed. "
-                                        "Item totals and final total do not align. Please review."
+                                        "⚠ Bill amount validation failed. Using calculated subtotal, tax, and total for save."
                                     )
-                                    save_allowed = False
-                            
-                            # 7. DUPLICATE CHECK - Prevent duplicate bills by comparing key fields
-                            # Matches on: invoice_number + vendor_name + purchase_date + total_amount (±0.02)
-                            if save_allowed:
-                                dup_result = detect_duplicate_bill_logical(bill_data, user_id=1)
-                                if dup_result.get("duplicate"):
-                                    st.error(
-                                        "⚠️ Duplicate bill detected! "
-                                        "A bill with the same invoice number, vendor, date, and amount already exists."
+                                    bill_data["subtotal"] = amount_validation["items_sum"]
+                                    bill_data["tax_amount"] = amount_validation["tax_amount"]
+                                    bill_data["total_amount"] = round(
+                                        amount_validation["items_sum"] + amount_validation["tax_amount"], 2
+                                    )
+                                    
+                                    # RE-RUN DUPLICATE CHECK after modifying amounts
+                                    # This ensures duplicate detection uses the corrected total_amount
+                                    validation_result = validate_bill_complete(bill_data, user_id=1)
+                                else:
+                                    time.sleep(1)
+                                    st.success("✅ Amount validation passed")
+                                
+                                # Duplicate detection (hard or soft) blocks save per requirement
+                                dup_check = validation_result["duplicate_check"]
+                                time.sleep(1)
+                                if dup_check.get("duplicate") or dup_check.get("soft_duplicate"):
+                                    reason = dup_check.get("reason", "Unknown reason")
+                                    st.warning(
+                                        f"⚠️ Duplicate bill detected. Reason: {reason}. Bill not saved."
                                     )
                                     save_allowed = False
                                     duplicate_detected = True
-                                elif dup_result.get("soft_duplicate"):
-                                    st.warning(
-                                        "⚠️ Possible duplicate (no invoice number). "
-                                        "Vendor/date/amount match an existing bill. Proceed if intentional."
-                                    )
-                                
+                                else:
+                                    time.sleep(1)
+                                    st.success("✅ No duplicate detected")
                             
                             # 8. STORE - Save to session state and database
                             if save_allowed:
@@ -350,17 +361,11 @@ def page_upload_process():
                                 
                                 st.success(f"✅ Bill saved successfully! (ID: {bill_id})")
                             
-                        # 10. DISPLAY - Rerun to show updated results and database tables
-                        if save_allowed:
-                            st.rerun()
-                        elif duplicate_detected:
-                            if st.button("Cancel and refresh", key="cancel_duplicate_single", type="secondary", icon="⏹"):
-                                st.session_state.extracted_bill_data = None
-                                st.session_state.bill_saved = False
-                                st.session_state.final_document_text = ""
+                            # 10. DISPLAY - Rerun to show updated results and database tables
+                            if save_allowed:
                                 st.rerun()
-                        else:
-                            st.stop()
+                            else:
+                                st.stop()
 
                 # WORKFLOW CASE B: Multi-page PDF processing
                 # Page-by-page navigation and individual save buttons
@@ -427,28 +432,43 @@ def page_upload_process():
                                 st.error(f"❌ Extraction failed: {bill_data['error']}")
                                 save_allowed = False
                             
-                            # Validate - Verify amount calculations
+                            # Validate - Unified validation: checks amounts AND duplicates
                             if save_allowed:
-                                validation = validate_bill_amounts(bill_data)
-                                if not validation["is_valid"]:
-                                    st.warning("⚠ Validation warning: Amounts may not align perfectly")
-                                    save_allowed = False
-                            
-                            # Duplicate Check - Prevent re-saving same bill from different pages
-                            if save_allowed:
-                                dup_result = detect_duplicate_bill_logical(bill_data, user_id=1)
-                                if dup_result.get("duplicate"):
-                                    st.error(
-                                        "⚠️ Duplicate bill detected! "
-                                        "A bill with the same invoice number, vendor, date, and amount already exists."
+                                validation_result = validate_bill_complete(bill_data, user_id=1)
+                                amount_validation = validation_result["amount_validation"]
+
+                                # Check amount validation; warn only and use calculated amounts if needed
+                                if not amount_validation["is_valid"]:
+                                    time.sleep(5)
+                                    st.warning(
+                                        "⚠ Validation warning: Amounts may not align perfectly. Using calculated subtotal, tax, and total for save."
+                                    )
+                                    bill_data["subtotal"] = amount_validation["items_sum"]
+                                    bill_data["tax_amount"] = amount_validation["tax_amount"]
+                                    bill_data["total_amount"] = round(
+                                        amount_validation["items_sum"] + amount_validation["tax_amount"], 2
+                                    )
+                                    
+                                    # RE-RUN DUPLICATE CHECK after modifying amounts
+                                    # This ensures duplicate detection uses the corrected total_amount
+                                    validation_result = validate_bill_complete(bill_data, user_id=1)
+                                else:
+                                    time.sleep(3)
+                                    st.success("✅ Amount validation passed")
+                                
+                                # Duplicate detection (hard or soft) blocks save per requirement
+                                dup_check = validation_result["duplicate_check"]
+                                time.sleep(5)
+                                if dup_check.get("duplicate") or dup_check.get("soft_duplicate"):
+                                    reason = dup_check.get("reason", "Unknown reason")
+                                    st.warning(
+                                        f"⚠️ Duplicate bill detected. Reason: {reason}. Bill not saved."
                                     )
                                     save_allowed = False
                                     duplicate_detected = True
-                                elif dup_result.get("soft_duplicate"):
-                                    st.warning(
-                                        "⚠️ Possible duplicate (no invoice number). "
-                                        "Vendor/date/amount match an existing bill. Proceed if intentional."
-                                    )
+                                else:
+                                    time.sleep(3)
+                                    st.success("✅ No duplicate detected")
                             
                             # Store - Save to database and update session state
                             if save_allowed:
@@ -458,17 +478,11 @@ def page_upload_process():
                                 st.session_state.bill_saved = True
                                 st.success(f"✅ Bill saved successfully! (ID: {bill_id})")
                             
-                        # Rerun to show updated results
-                        if save_allowed:
-                            st.rerun()
-                        elif duplicate_detected:
-                            if st.button("Cancel and refresh", key=f"cancel_duplicate_page_{current_idx}", type="secondary", icon="⏹"):
-                                st.session_state.extracted_bill_data = None
-                                st.session_state.bill_saved = False
-                                st.session_state.final_document_text = ""
+                            # Rerun to show updated results
+                            if save_allowed:
                                 st.rerun()
-                        else:
-                            st.stop()
+                            else:
+                                st.stop()
 
     # COLUMN 2: RESULTS DISPLAY - shows extracted data and database tables
     with col2:
@@ -504,10 +518,8 @@ def page_upload_process():
                                 'invoice_number',
                                 'vendor_name',
                                 'purchase_date',
-                                'payment_method',
-                                'total_amount',
-                                'tax_amount',
-                                'currency',
+                                'original_total_amount',
+                                'original_currency',
                             ]
 
                             # Table 1: Overview of all saved bills
@@ -596,11 +608,8 @@ def page_history():
             'invoice_number',
             'vendor_name',
             'purchase_date',
-            'purchase_time',
-            'payment_method',
-            'total_amount',
-            'tax_amount',
-            'currency',
+            'original_total_amount',
+            'original_currency',
         ]
 
         st.dataframe(
