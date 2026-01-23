@@ -308,6 +308,9 @@ def page_upload_process():
                             if "error" in bill_data:
                                 st.error(f"❌ Extraction failed: {bill_data['error']}")
                                 save_allowed = False
+                            else:
+                                time.sleep(6)
+                                st.success("✅ Data extraction and normalization completed")
                             
                             # 6. VALIDATE - Unified validation: checks amounts AND duplicates
                             if save_allowed:
@@ -316,7 +319,7 @@ def page_upload_process():
 
                                 # Check amount validation; if it fails, save using calculated amounts
                                 if not amount_validation["is_valid"]:
-                                    time.sleep(1)
+                                    time.sleep(5)
                                     st.warning(
                                         "⚠ Bill amount validation failed. Using calculated subtotal, tax, and total for save."
                                     )
@@ -330,21 +333,22 @@ def page_upload_process():
                                     # This ensures duplicate detection uses the corrected total_amount
                                     validation_result = validate_bill_complete(bill_data, user_id=1)
                                 else:
-                                    time.sleep(1)
+                                    time.sleep(5)
                                     st.success("✅ Amount validation passed")
                                 
                                 # Duplicate detection (hard or soft) blocks save per requirement
                                 dup_check = validation_result["duplicate_check"]
-                                time.sleep(1)
+                                time.sleep(4)
                                 if dup_check.get("duplicate") or dup_check.get("soft_duplicate"):
                                     reason = dup_check.get("reason", "Unknown reason")
+                                    time.sleep(4)
                                     st.warning(
                                         f"⚠️ Duplicate bill detected. Reason: {reason}. Bill not saved."
                                     )
                                     save_allowed = False
                                     duplicate_detected = True
                                 else:
-                                    time.sleep(1)
+                                    time.sleep(4)
                                     st.success("✅ No duplicate detected")
                             
                             # 8. STORE - Save to session state and database
@@ -357,8 +361,7 @@ def page_upload_process():
                                 st.session_state.bill_saved = True
                                 
                                 # 9. CACHE - Invalidate cache to reflect new bill in dashboard
-                                # Streamlit's @st.cache_data(ttl=60) auto-refreshes on next access
-                                
+                                time.sleep(4)
                                 st.success(f"✅ Bill saved successfully! (ID: {bill_id})")
                             
                             # 10. DISPLAY - Rerun to show updated results and database tables
@@ -431,6 +434,9 @@ def page_upload_process():
                             if "error" in bill_data:
                                 st.error(f"❌ Extraction failed: {bill_data['error']}")
                                 save_allowed = False
+                            else:
+                                time.sleep(6)
+                                st.success("✅ Data extraction and normalization completed")
                             
                             # Validate - Unified validation: checks amounts AND duplicates
                             if save_allowed:
@@ -453,7 +459,7 @@ def page_upload_process():
                                     # This ensures duplicate detection uses the corrected total_amount
                                     validation_result = validate_bill_complete(bill_data, user_id=1)
                                 else:
-                                    time.sleep(3)
+                                    time.sleep(5)
                                     st.success("✅ Amount validation passed")
                                 
                                 # Duplicate detection (hard or soft) blocks save per requirement
@@ -461,13 +467,14 @@ def page_upload_process():
                                 time.sleep(5)
                                 if dup_check.get("duplicate") or dup_check.get("soft_duplicate"):
                                     reason = dup_check.get("reason", "Unknown reason")
+                                    time.sleep(4)
                                     st.warning(
                                         f"⚠️ Duplicate bill detected. Reason: {reason}. Bill not saved."
                                     )
                                     save_allowed = False
                                     duplicate_detected = True
                                 else:
-                                    time.sleep(3)
+                                    time.sleep(4)
                                     st.success("✅ No duplicate detected")
                             
                             # Store - Save to database and update session state
@@ -476,6 +483,7 @@ def page_upload_process():
                                 st.session_state.extracted_bill_data = bill_data
                                 bill_id = insert_bill(bill_data)
                                 st.session_state.bill_saved = True
+                                time.sleep(3)
                                 st.success(f"✅ Bill saved successfully! (ID: {bill_id})")
                             
                             # Rerun to show updated results
