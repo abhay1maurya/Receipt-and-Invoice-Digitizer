@@ -1,8 +1,4 @@
 # Main application file for Receipt and Invoice Digitizer
-# This Streamlit app provides a multi-page interface for:
-# - Dashboard: View spending analytics and charts from saved bills
-# - Upload & Process: Upload and digitize receipts/invoices using Gemini OCR
-# - History: Browse all previously saved bills and line items
 
 import streamlit as st
 import sys
@@ -25,13 +21,6 @@ st.set_page_config(
 sys.path.append(os.path.abspath(os.path.dirname(__file__)))
 
 # Import core functionality from src package
-# WORKFLOW: Upload → Ingest → Preprocess → User Trigger → Gemini OCR → 
-#           Normalize → Validate → Duplicate Check → Store → Cache → Display
-# - ingestion: File upload handling (images, PDFs) and hash generation for change detection
-# - preprocessing: Image enhancement for better OCR accuracy
-# - ocr: Gemini API integration (includes normalization via extraction.normalizer)
-# - validation: Amount validation (inclusive/exclusive safe checks)
-# - database: SQLite persistence layer with duplicate detection for bills and line items
 try:
     from src.preprocessing import preprocess_image
     from src.ocr import run_ocr_and_extract_bill  # Internally uses normalizer
@@ -41,8 +30,6 @@ try:
 except ImportError as e:
     st.warning(f"⚠️ Module Import Warning: {e}")
 
-# SESSION STATE SETUP - Streamlit reruns the script on every interaction
-# Session state preserves variables across reruns to maintain application state
 
 # Navigation state - tracks which page user is viewing
 if 'current_page' not in st.session_state:
@@ -298,7 +285,7 @@ def page_upload_process():
                         target_img = processed_image or current_image
                         
                         with st.spinner("Extracting and saving bill..."):
-                            # 5. GEMINI OCR - Extract structured data with normalization
+                            # GEMINI OCR - Extract structured data with normalization
                             bill_data = run_ocr_and_extract_bill(target_img, st.session_state.api_key)
 
                             save_allowed = True
@@ -312,7 +299,7 @@ def page_upload_process():
                                 time.sleep(6)
                                 st.success("✅ Data extraction and normalization completed")
                             
-                            # 6. VALIDATE - Unified validation: checks amounts AND duplicates
+                            #  VALIDATE - Unified validation: checks amounts AND duplicates
                             if save_allowed:
                                 validation_result = validate_bill_complete(bill_data, user_id=1)
                                 amount_validation = validation_result["amount_validation"]
@@ -351,7 +338,7 @@ def page_upload_process():
                                     time.sleep(4)
                                     st.success("✅ No duplicate detected")
                             
-                            # 8. STORE - Save to session state and database
+                            # STORE - Save to session state and database
                             if save_allowed:
                                 st.session_state.final_document_text = ""
                                 st.session_state.extracted_bill_data = bill_data
@@ -359,12 +346,12 @@ def page_upload_process():
                                 # Insert into database (persistent storage)
                                 bill_id = insert_bill(bill_data)
                                 st.session_state.bill_saved = True
+                                time.sleep(1)
+                                st.success(f"✅ Bill saved successfully to database! (ID: {bill_id})")
                                 
-                                # 9. CACHE - Invalidate cache to reflect new bill in dashboard
-                                time.sleep(4)
-                                st.success(f"✅ Bill saved successfully! (ID: {bill_id})")
+                                time.sleep(3)
                             
-                            # 10. DISPLAY - Rerun to show updated results and database tables
+                            # DISPLAY - Rerun to show updated results and database tables
                             if save_allowed:
                                 st.rerun()
                             else:
@@ -483,8 +470,9 @@ def page_upload_process():
                                 st.session_state.extracted_bill_data = bill_data
                                 bill_id = insert_bill(bill_data)
                                 st.session_state.bill_saved = True
+                                time.sleep(1)
+                                st.success(f"✅ Bill saved successfully to database! (ID: {bill_id})")
                                 time.sleep(3)
-                                st.success(f"✅ Bill saved successfully! (ID: {bill_id})")
                             
                             # Rerun to show updated results
                             if save_allowed:

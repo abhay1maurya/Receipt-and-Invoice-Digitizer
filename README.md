@@ -32,8 +32,9 @@ This project is intentionally engineered as a **foundation system**, not a quick
   * Hard duplicate (invoice-level)
   * Soft duplicate (logical similarity)
 * 🗃️ **SQLite Persistent Storage**
-* 📊 **Dashboard Analytics**
-* 🕒 **History & Audit View**
+* 📊 **Dashboard Analytics** with visual charts and spending insights
+* 🕒 **History & Audit View** with bill detail inspection
+* 🗑️ **Bill Deletion** with cascade deletion of line items
 * 🔐 **Security-Conscious Design**
 * 🧱 **Extensible Modular Architecture**
 
@@ -81,7 +82,8 @@ Dashboard & History Views
 | PDF Processing   | pdf2image                |
 | Database         | SQLite                   |
 | Analytics        | Pandas, Plotly           |
-| Language         | Python 3.10+             |
+| API Client       | google-genai SDK         |
+| Language         | Python 3.13+             |
 
 ---
 
@@ -92,7 +94,10 @@ Receipt-and-Invoice-Digitizer/
 │
 ├── app.py                         # Main Streamlit application
 ├── dashboard.py                   # Analytics dashboard
+├── receipt_invoice.db             # SQLite database (auto-generated)
+├── .env                           # Environment variables (API keys)
 │
+├── .streamlit/                    # Streamlit configuration
 ├── src/
 │   ├── ingestion.py               # File ingestion & hashing
 │   ├── preprocessing.py           # Image preprocessing
@@ -107,6 +112,9 @@ Receipt-and-Invoice-Digitizer/
 │       ├── normalizer.py          # Data normalization
 │       └── currency_converter.py  # Currency conversion to USD
 │
+├── data/                          # Sample data directory
+├── documents/                     # Document storage
+├── static/                        # Static assets
 ├── requirements.txt
 ├── README.md
 └── .gitignore
@@ -245,7 +253,59 @@ CREATE TABLE lineitems (
 
 ---
 
-## 🔐 Security & Stability
+## � Getting Started
+
+### Prerequisites
+
+* Python 3.13 or higher
+* Google Gemini API key ([Get one here](https://makersuite.google.com/app/apikey))
+* poppler-utils (for PDF processing)
+
+### Installation
+
+1. **Clone the repository**
+   ```bash
+   git clone https://github.com/yourusername/Receipt-and-Invoice-Digitizer.git
+   cd Receipt-and-Invoice-Digitizer
+   ```
+
+2. **Install dependencies**
+   ```bash
+   pip install -r requirements.txt
+   ```
+
+3. **Download spaCy model**
+   ```bash
+   python -m spacy download en_core_web_sm
+   ```
+
+4. **Configure API key**
+   
+   Create a `.env` file in the project root:
+   ```env
+   GOOGLE_API_KEY="your_gemini_api_key_here"
+   ```
+   
+   Alternatively, enter your API key in the sidebar when running the app.
+
+5. **Run the application**
+   ```bash
+   streamlit run app.py
+   ```
+
+6. **Access the app**
+   
+   Open your browser and navigate to `http://localhost:8501`
+
+### Usage
+
+1. **Dashboard**: View spending analytics, charts, and financial insights
+2. **Upload & Process**: Upload receipts/invoices and digitize them using AI
+3. **History**: Browse all saved bills, view details, and manage records
+
+---
+
+## �🔐 Security & Stability
 
 * File size limits enforced (5MB)
 * PDF page limits enforced
@@ -259,48 +319,56 @@ CREATE TABLE lineitems (
 
 ## 📊 Dashboard Capabilities
 
-* Total spending overview
-* Average bill value
-* Vendor-wise spending
-* Time-based trends
-* Historical audit table
+* **Financial Metrics**
+  * Total spending overview
+  * Average bill value
+  * Monthly spending trends
+  * Number of vendors and transactions
+* **Visual Analytics**
+  * Vendor-wise spending charts
+  * Time-based trend analysis
+  * Category breakdowns
+* **Bill Management**
+  * Historical audit table
+  * Detailed bill inspection
+  * Delete bills with cascade removal of line items
+  * Data export capabilities
 
 ---
 
 ## 🛣️ Future Enhancements
 
-* Multi-user support
-* Manual bill editing
+* Multi-user authentication
+* Manual bill editing interface
 * Batch uploads
-* Export to CSV/Excel
+* Enhanced export (CSV/Excel/PDF)
 * Expense categorization
-* Budget alerts
-* Mobile-friendly UI
-* Vendor templates
-* Receipt confidence scoring
+* Budget tracking and alerts
+* Mobile-optimized responsive UI
+* Vendor templates and auto-fill
+* OCR confidence scoring
+* Advanced filtering and search
+* API endpoints for integrations
 
 ---
 
 ## 🏁 Current Status
 
-**Version**: `v1.0.0-beta`
+**Version**: `v1.0.0`  
+**Last Updated**: January 2026
+
 **Milestones Completed**:
 
-* Core ingestion & OCR pipeline
-* Multi-tier extraction
-* Validation & duplicate detection
-* Currency conversion
-* SQLite persistence
-* Dashboard & history views
+* ✅ Core ingestion & OCR pipeline
+* ✅ Multi-tier extraction (Gemini + Regex + spaCy)
+* ✅ Validation & duplicate detection
+* ✅ Multi-currency conversion to USD
+* ✅ SQLite persistence with indexes
+* ✅ Dashboard with analytics and charts
+* ✅ History view with detailed bill inspection
+* ✅ Bill deletion with cascade operations
+* ✅ Environment-based API key management
 
 ---
-
-## 📌 Final Notes
-
-This project is **not a toy OCR app**.
-It is a **correctness-first, architecture-driven system** designed to handle real-world document variability.
-
-If someone asks *“why this design?”*, you have a clear, defensible answer for every layer.
-
 
 

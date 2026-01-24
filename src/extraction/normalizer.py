@@ -1,6 +1,7 @@
 from typing import Dict, List
 from datetime import datetime
 
+# Utility helpers to normalize OCR/Gemini outputs into DB-friendly shapes
 
 # Safe converters
 

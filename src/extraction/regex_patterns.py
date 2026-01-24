@@ -25,7 +25,7 @@ TIME_PATTERNS = [
 # (Invoice, Bill, Receipt, INV#, etc). Multiple patterns catch variations
 # Capture group 2 gets the actual number (group 1 is the label)
 INVOICE_PATTERNS = [
-    r"(invoice|bill|receipt)[\s:#-]*([A-Z0-9\-\/]+)",  # Flexible label + number
+    r"(invoice|bill|receipt)[\s-:#]*([A-Z0-9\-\/]+)",  # Flexible label + number
     r"\bINV[\s\-:]?([A-Z0-9]+)\b",                      # Abbreviated "INV" format
     r"\bBILL[\s\-:]?([A-Z0-9\-\/]+)\b",                 # Abbreviated "BILL" format
 ]
