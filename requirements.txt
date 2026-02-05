@@ -9,7 +9,7 @@ cachetools==6.2.4
 catalogue==2.0.10
 certifi==2025.11.12
 cffi==2.0.0
-charset-normalizer @ file:///C:/miniconda3/conda-bld/charset-normalizer_1761744975868/work
+charset-normalizer 
 click==8.3.1
 cloudpathlib==0.23.0
 colorama==0.4.6
