@@ -6,6 +6,7 @@ from datetime import datetime, timedelta
 import io
 
 from src.database import get_all_bills, get_bill_items, delete_bill
+from src.export_bill import export_csv, export_excel, export_pdf, export_detailed_csv, export_detailed_excel, export_detailed_pdf
 
 # Professional color palette
 COLORS = {
@@ -226,6 +227,11 @@ def page_dashboard():
             st.success(f"✅ Showing **{len(filtered_df)}** of **{len(bills_df)}** bills | Total: **${filtered_df['total_amount'].sum():,.2f}**")
         else:
             st.info(f"📊 Showing all **{len(bills_df)}** bills | Total: **${filtered_df['total_amount'].sum():,.2f}**")
+    
+    with summary_col2:
+        st.markdown("")  # Spacer for alignment
+
+    
 
     # Charts
     st.markdown("### 📊 Spending Analytics")
@@ -545,6 +551,97 @@ def page_dashboard():
     
     st.divider()
 
+    # Export Section
+    st.divider()
+    st.markdown("### 📥 Export Bills")
+    
+    export_col1, export_col2, export_col3, export_col4 = st.columns([2, 1, 1, 1])
+    
+    with export_col1:
+        export_format = st.selectbox(
+            "Select export format:",
+            options=["CSV", "Excel", "PDF"],
+            key="export_format_selector",
+            help="Choose the format to export filtered bills"
+        )
+    
+    with export_col2:
+        export_type = st.selectbox(
+            "Export type:",
+            options=["Summary", "Detailed"],
+            key="export_type_selector",
+            help="Summary: Bills only | Detailed: Bills with line items"
+        )
+    
+    with export_col3:
+        st.markdown("")  # Spacer for alignment
+    
+    with export_col4:
+        if not filtered_df.empty:
+            try:
+                # Prepare export dataframe with all columns
+                export_df = filtered_df.copy()
+                
+                # Format numeric columns for better readability
+                numeric_columns = export_df.select_dtypes(include=['float64', 'int64']).columns
+                for col in numeric_columns:
+                    export_df[col] = pd.to_numeric(export_df[col], errors="coerce")
+                
+                # Get line items if detailed export is selected
+                if export_type == "Detailed":
+                    all_items = _cached_items(bills)
+                    items_df = pd.DataFrame(all_items) if all_items else pd.DataFrame()
+                    
+                    # Filter items to match filtered bills
+                    if not items_df.empty:
+                        filtered_bill_ids = export_df['id'].tolist()
+                        items_df = items_df[items_df['bill_id'].isin(filtered_bill_ids)]
+                    
+                    # Export detailed format
+                    if export_format == "CSV":
+                        file_data = export_detailed_csv(export_df, items_df)
+                        file_name = f"bills_detailed_export_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
+                        mime_type = "text/csv"
+                    elif export_format == "Excel":
+                        file_data = export_detailed_excel(export_df, items_df)
+                        file_name = f"bills_detailed_export_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
+                        mime_type = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                    else:  # PDF
+                        file_data = export_detailed_pdf(export_df, items_df)
+                        file_name = f"bills_detailed_export_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf"
+                        mime_type = "application/pdf"
+                else:
+                    # Export summary format (bills only)
+                    if export_format == "CSV":
+                        file_data = export_csv(export_df)
+                        file_name = f"bills_export_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
+                        mime_type = "text/csv"
+                    elif export_format == "Excel":
+                        file_data = export_excel(export_df)
+                        file_name = f"bills_export_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
+                        mime_type = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                    else:  # PDF
+                        file_data = export_pdf(export_df)
+                        file_name = f"bills_export_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf"
+                        mime_type = "application/pdf"
+                
+                export_label = f"📥 Export {export_type} {export_format}"
+                st.download_button(
+                    label=export_label,
+                    data=file_data,
+                    file_name=file_name,
+                    mime=mime_type,
+                    type="primary",
+                    use_container_width=True,
+                    key="export_download_button"
+                )
+            except Exception as e:
+                st.error(f"❌ Error preparing export: {str(e)}")
+        else:
+            st.button("📥 Export", type="primary", disabled=True, use_container_width=True, help="No data to export")
+    
+    st.divider()
+
     # Recent bills
     st.markdown("### 📋 Recent Bills")
     recent_cols = ["id", "invoice_number", "vendor_name", "purchase_date", "purchase_time", "payment_method", "total_amount", "tax_amount", "currency"]
@@ -733,3 +830,5 @@ def page_dashboard():
                     st.error(f"❌ Bill #{selected_delete_id} not found in database.")
             except Exception as e:
                 st.error(f"❌ Error deleting bill: {str(e)}")
+
+
