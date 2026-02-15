@@ -7,7 +7,8 @@ import time
 import pandas as pd
 import plotly.graph_objects as go
 import plotly.express as px
-from dashboard import page_dashboard
+from src.dashboard.dashboard_page import page_dashboard
+from src.admin_page import page_admin
 
 # PAGE CONFIGURATION - Sets up browser tab title, icon, and layout
 st.set_page_config(
@@ -116,6 +117,10 @@ with st.sidebar:
     
     if st.button("🕒 History", key="nav_history", width="stretch"):
         st.session_state.current_page = "History"
+        st.rerun()
+
+    if st.button("🛠️ Admin", key="nav_admin", width="stretch"):
+        st.session_state.current_page = "Admin"
         st.rerun()
     
     st.divider()
@@ -628,3 +633,5 @@ elif st.session_state.current_page == "Upload & Process":
     page_upload_process()
 elif st.session_state.current_page == "History":
     page_history()
+elif st.session_state.current_page == "Admin":
+    page_admin()
